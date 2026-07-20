@@ -1,0 +1,6 @@
+{
+  "name": "MémoTack",
+  "description": "Application mobile d'apprentissage par répétition espacée, basée sur des flashcards actives avec un réglage granulaire des rappels.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

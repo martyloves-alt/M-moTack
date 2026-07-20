@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #1E1B22;
+  --color-ink-light: #2A2631;
+  --color-paper: #F5EFE1;
+  --color-paper-muted: #B9AE9A;
+  --color-soot: #2A2318;
+  
+  --color-coral: #C1440E;
+  --color-amber: #C99A2E;
+  --color-sage: #4C6B4F;
+  --color-ink-blue: #3A5A68;
+
+  --font-serif: "Fraunces", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-soot font-sans antialiased;
+  }
+  
+  .dark body {
+    @apply bg-ink text-paper;
+  }
+}
+
+/* Hide scrollbar for cleaner look */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
