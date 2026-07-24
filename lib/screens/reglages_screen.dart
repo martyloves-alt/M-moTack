@@ -11,9 +11,11 @@ class ReglagesScreen extends StatelessWidget {
     final startParts = appState.settings.activeHoursStart.split(':');
     final endParts = appState.settings.activeHoursEnd.split(':');
     final startMinutes = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
-    final endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
-    final diff = endMinutes - startMinutes;
-    return diff > 0 ? diff : 0;
+    var endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+    if (endMinutes <= startMinutes) {
+      endMinutes += 24 * 60;
+    }
+    return endMinutes - startMinutes;
   }
 
   @override
