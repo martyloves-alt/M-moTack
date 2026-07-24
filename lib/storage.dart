@@ -3,20 +3,18 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'notifications.dart';
 
 const _kCardsKey = 'memotack_cards';
 const _kTagsKey = 'memotack_tags';
 const _kSettingsKey = 'memotack_settings';
 
-/// Étiquettes par défaut, reprises du prototype.
 List<Tag> defaultTags() => const [
       Tag(id: 'medical', name: 'Médical', color: TagColor.corail),
       Tag(id: 'reseaux', name: 'Réseaux sociaux', color: TagColor.ambre),
       Tag(id: 'perso', name: 'Perso', color: TagColor.sauge),
     ];
 
-/// Garde en mémoire les cartes, étiquettes et réglages de l'appli,
-/// et les sauvegarde sur le téléphone à chaque changement.
 class AppState extends ChangeNotifier {
   List<Flashcard> cards = [];
   List<Tag> tags = defaultTags();
@@ -49,6 +47,7 @@ class AppState extends ChangeNotifier {
 
     isLoaded = true;
     notifyListeners();
+    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> _saveCards() async {
@@ -68,17 +67,20 @@ class AppState extends ChangeNotifier {
     cards = [...cards, card];
     notifyListeners();
     await _saveCards();
+    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> updateCard(Flashcard updated) async {
     cards = cards.map((c) => c.id == updated.id ? updated : c).toList();
     notifyListeners();
     await _saveCards();
+    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> updateSettings(Settings updated) async {
     settings = updated;
     notifyListeners();
     await _saveSettings();
+    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
   }
 }
