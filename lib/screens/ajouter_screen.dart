@@ -80,7 +80,7 @@ class _AjouterScreenState extends State<AjouterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('MOT OU PHRASE', style: stampStyle(color: AppColors.soot.withOpacity(0.6))),
+                Text('MOT OU PHRASE', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 4),
                 TextField(
                   controller: _frontController,
@@ -91,18 +91,18 @@ class _AjouterScreenState extends State<AjouterScreen> {
                     border: InputBorder.none,
                     counterText: '',
                     hintText: 'ex. Anasarque, ou une courte phrase...',
-                    hintStyle: TextStyle(color: AppColors.soot.withOpacity(0.4)),
+                    hintStyle: TextStyle(color: AppColors.soot.withValues(alpha: 0.4)),
                   ),
                 ),
                 Align(
                   alignment: Alignment.centerRight,
                   child: Text(
                     '${_frontController.text.length}/150',
-                    style: TextStyle(color: AppColors.soot.withOpacity(0.4), fontSize: 10),
+                    style: TextStyle(color: AppColors.soot.withValues(alpha: 0.4), fontSize: 10),
                   ),
                 ),
-                Divider(color: AppColors.soot.withOpacity(0.1)),
-                Text('DÉFINITION / NOTE (OPTIONNEL)', style: stampStyle(color: AppColors.soot.withOpacity(0.6))),
+                Divider(color: AppColors.soot.withValues(alpha: 0.1)),
+                Text('DÉFINITION / NOTE (OPTIONNEL)', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 4),
                 TextField(
                   controller: _backController,
@@ -110,11 +110,11 @@ class _AjouterScreenState extends State<AjouterScreen> {
                   decoration: InputDecoration(
                     border: InputBorder.none,
                     hintText: 'Un rappel du sens, si besoin',
-                    hintStyle: TextStyle(color: AppColors.soot.withOpacity(0.4)),
+                    hintStyle: TextStyle(color: AppColors.soot.withValues(alpha: 0.4)),
                   ),
                 ),
-                Divider(color: AppColors.soot.withOpacity(0.1)),
-                Text('ÉTIQUETTE', style: stampStyle(color: AppColors.soot.withOpacity(0.6))),
+                Divider(color: AppColors.soot.withValues(alpha: 0.1)),
+                Text('ÉTIQUETTE', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -126,7 +126,7 @@ class _AjouterScreenState extends State<AjouterScreen> {
                       onSelected: (_) => setState(() => _selectedTagId = t.id),
                       selectedColor: AppColors.inkBlue,
                       backgroundColor: Colors.transparent,
-                      side: BorderSide(color: selected ? AppColors.inkBlue : AppColors.soot.withOpacity(0.2)),
+                      side: BorderSide(color: selected ? AppColors.inkBlue : AppColors.soot.withValues(alpha: 0.2)),
                       labelStyle: TextStyle(color: selected ? AppColors.paper : AppColors.soot, fontSize: 11),
                     );
                   }).toList(),
@@ -164,7 +164,7 @@ class _AjouterScreenState extends State<AjouterScreen> {
                         if (_backController.text.isNotEmpty)
                           Text(
                             _backController.text,
-                            style: TextStyle(color: AppColors.soot.withOpacity(0.6), fontSize: 12),
+                            style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
                           ),
                       ],
                     ),
