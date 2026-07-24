@@ -78,7 +78,7 @@ void main() {
 
     test('l echeance repart de now, pas de l ancienne echeance (pas de derive)', () {
       final scheduledFor = DateTime(2026, 1, 1, 10, 0);
-      final reviewedLateAt = DateTime(2026, 1, 3, 18, 0); // 2 jours de retard
+      final reviewedLateAt = DateTime(2026, 1, 3, 18, 0);
       final card = Flashcard(
         id: '1',
         front: 'Test',
@@ -200,13 +200,11 @@ void main() {
     });
 
     test('les creneaux deja passes ne sont pas repris', () {
-      final now = DateTime(2026, 1, 1, 15, 0); // en cours de journee
+      final now = DateTime(2026, 1, 1, 15, 0);
 
       final schedule =
           buildDailySchedule(cards: [], settings: settings, now: now);
 
-      // Fenetre 8h-20h divisee en 4 = creneaux a 8h, 11h, 14h, 17h.
-      // Seul 17h est encore a venir apres 15h.
       expect(schedule.length, 1);
     });
 
@@ -220,17 +218,33 @@ void main() {
       expect(schedule, isEmpty);
     });
 
-    test('plage horaire invalide (fin avant debut) ne programme rien', () {
+    test('plage horaire qui traverse minuit (ex. 20h -> 8h) est geree correctement', () {
       final now = DateTime(2026, 1, 1, 7, 0);
-      final invalidSettings = settings.copyWith(
+      final overnightSettings = settings.copyWith(
         activeHoursStart: '20:00',
         activeHoursEnd: '08:00',
       );
 
       final schedule =
-          buildDailySchedule(cards: [], settings: invalidSettings, now: now);
+          buildDailySchedule(cards: [], settings: overnightSettings, now: now);
 
-      expect(schedule, isEmpty);
+      // Fenetre 20h -> 8h le lendemain = 12h, divisee en 4 = un creneau
+      // toutes les 3h, tous a venir puisque now = 7h du matin.
+      expect(schedule.length, 4);
+    });
+
+    test('plage finissant a minuit (00:00) traverse bien vers le lendemain', () {
+      final now = DateTime(2026, 1, 1, 7, 0);
+      final midnightSettings = settings.copyWith(
+        activeHoursStart: '09:00',
+        activeHoursEnd: '00:00',
+      );
+
+      final schedule =
+          buildDailySchedule(cards: [], settings: midnightSettings, now: now);
+
+      // 09:00 -> 00:00 le lendemain = 15h, divisee en 4 creneaux.
+      expect(schedule.length, 4);
     });
 
     test('plus de cartes dues que de creneaux : les surplus attendent', () {
