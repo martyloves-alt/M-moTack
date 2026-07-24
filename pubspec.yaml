@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   google_fonts: ^6.0.0
   shared_preferences: ^2.0.0
+  flutter_local_notifications: ^17.0.0
+  timezone: ^0.9.0
 
 dev_dependencies:
   flutter_test:
