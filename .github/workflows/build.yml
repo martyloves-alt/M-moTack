@@ -1,0 +1,31 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Generer le dossier Android
+        run: flutter create --platforms=android .
+
+      - name: Installer les dependances
+        run: flutter pub get
+
+      - name: Construire l'APK
+        run: flutter build apk --release
+
+      - name: Mettre l'APK a disposition
+        uses: actions/upload-artifact@v4
+        with:
+          name: memotack-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
