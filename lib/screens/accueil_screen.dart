@@ -170,14 +170,14 @@ class _CardTile extends StatelessWidget {
                       card.back,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: AppColors.soot.withOpacity(0.6), fontSize: 12),
+                      style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
                     ),
                   ],
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: AppColors.soot.withOpacity(0.08),
+                      color: AppColors.soot.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(tag.name, style: TextStyle(color: AppColors.soot, fontSize: 9)),
@@ -188,8 +188,8 @@ class _CardTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('NIV.${card.level}', style: stampStyle(size: 9, color: AppColors.soot.withOpacity(0.5))),
-                Text(dueLabel, style: stampStyle(size: 9, color: AppColors.soot.withOpacity(0.5))),
+                Text('NIV.${card.level}', style: stampStyle(size: 9, color: AppColors.soot.withValues(alpha: 0.5))),
+                Text(dueLabel, style: stampStyle(size: 9, color: AppColors.soot.withValues(alpha: 0.5))),
               ],
             ),
           ],
@@ -222,7 +222,7 @@ class _CardTile extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(tag.name, style: TextStyle(color: AppColors.soot.withOpacity(0.6), fontSize: 12)),
+                  Text(tag.name, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12)),
                   const SizedBox(height: 8),
                   Text(
                     card.front,
@@ -236,12 +236,12 @@ class _CardTile extends StatelessWidget {
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.soot.withOpacity(0.06),
+                          color: AppColors.soot.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           showBack ? card.back : 'Toucher pour voir la définition',
-                          style: TextStyle(color: AppColors.soot.withOpacity(0.8)),
+                          style: TextStyle(color: AppColors.soot.withValues(alpha: 0.8)),
                         ),
                       ),
                     ),
