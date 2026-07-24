@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../models.dart';
 import '../storage.dart';
 import '../theme.dart';
 
@@ -44,14 +43,14 @@ class ReglagesScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('RAPPELS PAR JOUR', style: stampStyle(color: AppColors.soot.withOpacity(0.6))),
+                Text('RAPPELS PAR JOUR', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     _roundButton(
                       icon: Icons.remove,
-                      background: AppColors.soot.withOpacity(0.08),
+                      background: AppColors.soot.withValues(alpha: 0.08),
                       iconColor: AppColors.soot,
                       onTap: () {
                         int next = settings.remindersPerDay - 1;
@@ -78,7 +77,7 @@ class ReglagesScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   'Environ un rappel toutes les $intervalLabel h, entre ${settings.activeHoursStart} et ${settings.activeHoursEnd}.',
-                  style: TextStyle(color: AppColors.soot.withOpacity(0.6), fontSize: 12),
+                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
                 ),
               ],
             ),
@@ -90,7 +89,7 @@ class ReglagesScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('PLAGE HORAIRE ACTIVE', style: stampStyle(color: AppColors.soot.withOpacity(0.6))),
+                Text('PLAGE HORAIRE ACTIVE', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -158,13 +157,13 @@ class ReglagesScreen extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         decoration: BoxDecoration(
-          color: AppColors.soot.withOpacity(0.06),
+          color: AppColors.soot.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: TextStyle(color: AppColors.soot.withOpacity(0.5), fontSize: 10)),
+            Text(label, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.5), fontSize: 10)),
             Text(value, style: TextStyle(color: AppColors.soot, fontSize: 15, fontWeight: FontWeight.w600)),
           ],
         ),
