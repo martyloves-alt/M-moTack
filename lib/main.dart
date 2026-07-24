@@ -73,7 +73,7 @@ class _RootScreenState extends State<RootScreen> {
         selectedIndex: tabIndex,
         onDestinationSelected: (i) => setState(() => tabIndex = i),
         backgroundColor: AppColors.inkLight,
-        indicatorColor: AppColors.corail.withOpacity(0.2),
+        indicatorColor: AppColors.corail.withValues(alpha: 0.2),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
