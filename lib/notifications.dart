@@ -62,6 +62,7 @@ class NotificationService {
         tz.TZDateTime.from(time, tz.local),
         details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       );
     } catch (_) {
       try {
@@ -72,6 +73,7 @@ class NotificationService {
           tz.TZDateTime.from(time, tz.local),
           details,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         );
       } catch (e) {
         debugPrint('MémoTack: rappel $id impossible a programmer ($e)');
