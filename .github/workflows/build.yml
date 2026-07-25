@@ -18,6 +18,33 @@ jobs:
       - name: Generer le dossier Android
         run: flutter create --platforms=android .
 
+      - name: Activer le desugaring pour flutter_local_notifications
+        run: |
+          if [ -f android/app/build.gradle.kts ]; then
+            FILE=android/app/build.gradle.kts
+            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$FILE"
+            {
+              echo ""
+              echo "dependencies {"
+              echo "    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")"
+              echo "}"
+            } >> "$FILE"
+            echo "Desugaring active dans $FILE"
+          elif [ -f android/app/build.gradle ]; then
+            FILE=android/app/build.gradle
+            sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$FILE"
+            {
+              echo ""
+              echo "dependencies {"
+              echo "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              echo "}"
+            } >> "$FILE"
+            echo "Desugaring active dans $FILE"
+          else
+            echo "Fichier build.gradle introuvable dans android/app"
+            exit 1
+          fi
+
       - name: Installer les dependances
         run: flutter pub get
 
