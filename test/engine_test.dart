@@ -179,7 +179,9 @@ void main() {
       final schedule =
           buildDailySchedule(cards: [], settings: settings, now: now);
 
-      expect(schedule.length, 4);
+      // 4 creneaux aujourd'hui + 4 demain, puisque le calcul couvre
+      // maintenant les deux jours.
+      expect(schedule.length, 8);
       expect(schedule.every((s) => s.flashcardId == null), isTrue);
     });
 
@@ -199,13 +201,15 @@ void main() {
       expect(schedule[3].flashcardId, isNull);
     });
 
-    test('les creneaux deja passes ne sont pas repris', () {
+    test('les creneaux deja passes ne sont pas repris, mais demain suit', () {
       final now = DateTime(2026, 1, 1, 15, 0);
 
       final schedule =
           buildDailySchedule(cards: [], settings: settings, now: now);
 
-      expect(schedule.length, 1);
+      // Seul le creneau de 17:00 reste aujourd'hui (08:00, 11:00 et 14:00
+      // sont deja passes), plus les 4 creneaux de demain : 5 au total.
+      expect(schedule.length, 5);
     });
 
     test('remindersPerDay=0 ne programme rien', () {
@@ -229,8 +233,9 @@ void main() {
           buildDailySchedule(cards: [], settings: overnightSettings, now: now);
 
       // Fenetre 20h -> 8h le lendemain = 12h, divisee en 4 = un creneau
-      // toutes les 3h, tous a venir puisque now = 7h du matin.
-      expect(schedule.length, 4);
+      // toutes les 3h. Le calcul couvrant aujourd'hui ET demain, ca fait
+      // 4 creneaux pour chaque jour, tous a venir puisque now = 7h : 8 au total.
+      expect(schedule.length, 8);
     });
 
     test('plage finissant a minuit (00:00) traverse bien vers le lendemain', () {
@@ -243,26 +248,41 @@ void main() {
       final schedule =
           buildDailySchedule(cards: [], settings: midnightSettings, now: now);
 
-      // 09:00 -> 00:00 le lendemain = 15h, divisee en 4 creneaux.
-      expect(schedule.length, 4);
+      // 09:00 -> 00:00 le lendemain = 15h, divisee en 4 creneaux, pour
+      // aujourd'hui et pour demain : 8 au total.
+      expect(schedule.length, 8);
     });
 
     test('plus de cartes dues que de creneaux : les surplus attendent', () {
       final now = DateTime(2026, 1, 1, 7, 0);
       final cards = List.generate(
-        6,
+        10,
         (i) => cardAt('carte$i', now.subtract(Duration(hours: i + 1))),
       );
 
       final schedule =
           buildDailySchedule(cards: cards, settings: settings, now: now);
 
-      expect(schedule.length, 4);
+      // 4 creneaux aujourd'hui + 4 demain = 8, pour 10 cartes dues : les 2
+      // moins en retard (carte0, carte1) restent en attente.
+      expect(schedule.length, 8);
       expect(schedule.every((s) => s.flashcardId != null), isTrue);
 
       final assignedIds =
           schedule.map((s) => s.flashcardId).whereType<String>().toSet();
-      expect(assignedIds, {'carte5', 'carte4', 'carte3', 'carte2'});
+      expect(
+        assignedIds,
+        {
+          'carte9',
+          'carte8',
+          'carte7',
+          'carte6',
+          'carte5',
+          'carte4',
+          'carte3',
+          'carte2',
+        },
+      );
     });
   });
 }
