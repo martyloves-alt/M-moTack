@@ -57,12 +57,38 @@ DateTime _combineDateAndTime(DateTime date, String hhmm) {
   return DateTime(date.year, date.month, date.day, hour, minute);
 }
 
-/// Calcule les creneaux de rappel restants pour aujourd'hui, et la carte
-/// a montrer a chaque creneau, selon les reglages et les cartes dues.
+/// Calcule les creneaux de rappel pour un jour donne (seule la date de
+/// [dayAnchor] est utilisee), selon les heures actives et le nombre de
+/// rappels par jour.
 ///
 /// Si l'heure de fin tombe avant (ou egale a) l'heure de debut, la plage
 /// est consideree comme traversant minuit (ex. 09:00 -> 00:00 = 15h,
 /// jusqu'a minuit la nuit suivante) plutot que d'etre invalide.
+List<DateTime> _slotsForDay(DateTime dayAnchor, Settings settings) {
+  final start = _combineDateAndTime(dayAnchor, settings.activeHoursStart);
+  var end = _combineDateAndTime(dayAnchor, settings.activeHoursEnd);
+  if (!end.isAfter(start)) {
+    end = end.add(const Duration(days: 1));
+  }
+
+  final totalWindow = end.difference(start);
+  final slotGap = Duration(
+    microseconds: totalWindow.inMicroseconds ~/ settings.remindersPerDay,
+  );
+
+  return List<DateTime>.generate(
+    settings.remindersPerDay,
+    (i) => start.add(slotGap * i),
+  );
+}
+
+/// Calcule les creneaux de rappel a venir et la carte a montrer a chaque
+/// creneau, selon les reglages et les cartes dues.
+///
+/// Couvre aujourd'hui ET demain (pas seulement aujourd'hui) : si tous les
+/// creneaux du jour sont deja passes au moment de l'appel (ex. l'appli est
+/// rouverte tard le soir, apres le dernier creneau prevu), on retombe quand
+/// meme sur les creneaux de demain plutot que de ne rien programmer du tout.
 List<ScheduledReminder> buildDailySchedule({
   required List<Flashcard> cards,
   required Settings settings,
@@ -72,21 +98,11 @@ List<ScheduledReminder> buildDailySchedule({
     return const [];
   }
 
-  final startToday = _combineDateAndTime(now, settings.activeHoursStart);
-  var endToday = _combineDateAndTime(now, settings.activeHoursEnd);
-  if (!endToday.isAfter(startToday)) {
-    endToday = endToday.add(const Duration(days: 1));
-  }
-
-  final totalWindow = endToday.difference(startToday);
-  final slotGap = Duration(
-    microseconds: totalWindow.inMicroseconds ~/ settings.remindersPerDay,
-  );
-
-  final allSlots = List<DateTime>.generate(
-    settings.remindersPerDay,
-    (i) => startToday.add(slotGap * i),
-  );
+  final tomorrow = now.add(const Duration(days: 1));
+  final allSlots = [
+    ..._slotsForDay(now, settings),
+    ..._slotsForDay(tomorrow, settings),
+  ]..sort();
 
   final remainingSlots = allSlots.where((slot) => slot.isAfter(now)).toList();
 
