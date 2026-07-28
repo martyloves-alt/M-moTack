@@ -117,4 +117,28 @@ class NotificationService {
       id++;
     }
   }
+
+  /// TEST TEMPORAIRE : envoie une notification IMMEDIATE (pas programmee),
+  /// pour verifier que la chaine Android (permission, canal, affichage)
+  /// fonctionne, independamment de la programmation a une heure precise.
+  /// A retirer une fois le diagnostic termine.
+  Future<void> showTestNotification() async {
+    await init();
+    if (!_initialized) return;
+
+    const androidDetails = AndroidNotificationDetails(
+      'memotack_rappels',
+      'Rappels MémoTack',
+      channelDescription: 'Rappels pour réviser tes mots et phrases',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    try {
+      await _plugin.show(999999, 'MémoTack', 'Notification de test', details);
+    } catch (e) {
+      debugPrint('MémoTack: notification de test impossible ($e)');
+    }
+  }
 }
