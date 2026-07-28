@@ -1,144 +1,106 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest_all.dart' as tz_data;
-import 'package:timezone/timezone.dart' as tz;
+import 'package:flutter/material.dart';
 
-import 'engine.dart';
-import 'models.dart';
+import 'theme.dart';
+import 'storage.dart';
+import 'notifications.dart';
+import 'screens/accueil_screen.dart';
+import 'screens/ajouter_screen.dart';
+import 'screens/reglages_screen.dart';
 
-/// Gere la programmation des rappels sous forme de notifications Android.
-///
-/// Toute erreur est interceptee et journalisee sans jamais faire planter
-/// l'application.
-class NotificationService {
-  static final NotificationService instance = NotificationService._();
-  NotificationService._();
+void main() {
+  runApp(const MemoTackApp());
+}
 
-  final _plugin = FlutterLocalNotificationsPlugin();
-  bool _initialized = false;
+class MemoTackApp extends StatefulWidget {
+  const MemoTackApp({super.key});
 
-  Future<void> init() async {
-    if (_initialized) return;
+  @override
+  State<MemoTackApp> createState() => _MemoTackAppState();
+}
 
-    try {
-      tz_data.initializeTimeZones();
-      // Fuseau fixe (UTC+1, comme Cotonou) : evite une dependance
-      // supplementaire rien que pour detecter le fuseau de l'appareil.
-      tz.setLocalLocation(tz.getLocation('Africa/Lagos'));
+class _MemoTackAppState extends State<MemoTackApp> {
+  final AppState appState = AppState();
 
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const initSettings = InitializationSettings(android: androidSettings);
-      await _plugin.initialize(initSettings);
+  @override
+  void initState() {
+    super.initState();
+    appState.load();
 
-      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      await androidImpl?.requestNotificationsPermission();
-      await androidImpl?.requestExactAlarmsPermission();
-
-      _initialized = true;
-    } catch (e) {
-      debugPrint('MémoTack: initialisation des notifications impossible ($e)');
-    }
+    // TEST TEMPORAIRE : notification immediate 5s apres l'ouverture, pour
+    // isoler si le probleme vient d'Android (permission/canal) ou de la
+    // programmation a une heure precise. A retirer une fois le diagnostic
+    // termine.
+    Future.delayed(const Duration(seconds: 5), () {
+      NotificationService.instance.showTestNotification();
+    });
   }
 
-  Flashcard? _findCard(List<Flashcard> cards, String id) {
-    for (final c in cards) {
-      if (c.id == id) return c;
-    }
-    return null;
-  }
-
-  Future<void> _scheduleOne({
-    required int id,
-    required String body,
-    required DateTime time,
-    required NotificationDetails details,
-  }) async {
-    try {
-      await _plugin.zonedSchedule(
-        id,
-        'MémoTack',
-        body,
-        tz.TZDateTime.from(time, tz.local),
-        details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-      );
-    } catch (_) {
-      try {
-        await _plugin.zonedSchedule(
-          id,
-          'MémoTack',
-          body,
-          tz.TZDateTime.from(time, tz.local),
-          details,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-        );
-      } catch (e) {
-        debugPrint('MémoTack: rappel $id impossible a programmer ($e)');
-      }
-    }
-  }
-
-  Future<void> rescheduleAll({
-    required List<Flashcard> cards,
-    required Settings settings,
-  }) async {
-    await init();
-    if (!_initialized) return;
-
-    try {
-      await _plugin.cancelAll();
-    } catch (e) {
-      debugPrint('MémoTack: annulation des rappels impossible ($e)');
-    }
-
-    final now = DateTime.now();
-    final schedule = buildDailySchedule(cards: cards, settings: settings, now: now);
-
-    const androidDetails = AndroidNotificationDetails(
-      'memotack_rappels',
-      'Rappels MémoTack',
-      channelDescription: 'Rappels pour réviser tes mots et phrases',
-      importance: Importance.high,
-      priority: Priority.high,
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'MémoTack',
+      debugShowCheckedModeBanner: false,
+      theme: buildAppTheme(),
+      home: ListenableBuilder(
+        listenable: appState,
+        builder: (context, _) {
+          if (!appState.isLoaded) {
+            return const Scaffold(
+              backgroundColor: Color(0xFF1E1B22),
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return RootScreen(appState: appState);
+        },
+      ),
     );
-    const details = NotificationDetails(android: androidDetails);
-
-    var id = 0;
-    for (final slot in schedule) {
-      final flashcardId = slot.flashcardId;
-      if (flashcardId == null) continue;
-      final card = _findCard(cards, flashcardId);
-      if (card == null) continue;
-
-      await _scheduleOne(id: id, body: card.front, time: slot.time, details: details);
-      id++;
-    }
   }
+}
 
-  /// TEST TEMPORAIRE : envoie une notification IMMEDIATE (pas programmee),
-  /// pour verifier que la chaine Android (permission, canal, affichage)
-  /// fonctionne, independamment de la programmation a une heure precise.
-  /// A retirer une fois le diagnostic termine.
-  Future<void> showTestNotification() async {
-    await init();
-    if (!_initialized) return;
+class RootScreen extends StatefulWidget {
+  final AppState appState;
+  const RootScreen({super.key, required this.appState});
 
-    const androidDetails = AndroidNotificationDetails(
-      'memotack_rappels',
-      'Rappels MémoTack',
-      channelDescription: 'Rappels pour réviser tes mots et phrases',
-      importance: Importance.high,
-      priority: Priority.high,
+  @override
+  State<RootScreen> createState() => _RootScreenState();
+}
+
+class _RootScreenState extends State<RootScreen> {
+  int tabIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      AccueilScreen(appState: widget.appState),
+      AjouterScreen(appState: widget.appState),
+      ReglagesScreen(appState: widget.appState),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(index: tabIndex, children: screens),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: tabIndex,
+        onDestinationSelected: (i) => setState(() => tabIndex = i),
+        backgroundColor: AppColors.inkLight,
+        indicatorColor: AppColors.corail.withValues(alpha: 0.2),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Accueil',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.add_circle_outline),
+            selectedIcon: Icon(Icons.add_circle),
+            label: 'Ajouter',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Réglages',
+          ),
+        ],
+      ),
     );
-    const details = NotificationDetails(android: androidDetails);
-
-    try {
-      await _plugin.show(999999, 'MémoTack', 'Notification de test', details);
-    } catch (e) {
-      debugPrint('MémoTack: notification de test impossible ($e)');
-    }
   }
 }
