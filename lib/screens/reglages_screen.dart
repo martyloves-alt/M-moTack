@@ -1,12 +1,35 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../notifications.dart';
 import '../storage.dart';
 import '../theme.dart';
 
-class ReglagesScreen extends StatelessWidget {
+class ReglagesScreen extends StatefulWidget {
   final AppState appState;
   const ReglagesScreen({super.key, required this.appState});
+
+  @override
+  State<ReglagesScreen> createState() => _ReglagesScreenState();
+}
+
+class _ReglagesScreenState extends State<ReglagesScreen> {
+  AppState get appState => widget.appState;
+
+  /// Secondes restantes avant le declenchement du rappel de test.
+  /// `null` tant qu'aucun test programme n'est en cours.
+  int? _secondsLeft;
+  Timer? _countdown;
+
+  /// Instant vise par le rappel de test, source de verite du compte a rebours.
+  DateTime? _deadline;
+
+  @override
+  void dispose() {
+    _countdown?.cancel();
+    super.dispose();
+  }
 
   int get _activeMinutes {
     final startParts = appState.settings.activeHoursStart.split(':');
@@ -128,10 +151,14 @@ class ReglagesScreen extends StatelessWidget {
                 Text('DIAGNOSTIC', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 10),
                 Text(
-                  'Envoie une notification tout de suite. Si elle apparaît mais que '
-                  'les rappels programmés n\'arrivent jamais, le problème vient des '
-                  'alarmes, pas de l\'affichage.',
-                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
+                  'Les deux boutons ne testent pas la même chose.\n\n'
+                  '• Immédiate : affiche une notification tout de suite, sans passer '
+                  'par une alarme. Vérifie l\'autorisation et l\'affichage.\n\n'
+                  '• Programmée : emprunte exactement le chemin des vrais rappels '
+                  '(alarme Android + receiver), mais à 60 secondes.\n\n'
+                  'Si l\'immédiate apparaît et pas la programmée, le problème vient '
+                  'des alarmes, pas de l\'affichage.',
+                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12, height: 1.4),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -139,7 +166,7 @@ class ReglagesScreen extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: () => _sendTestNotification(context),
                     icon: const Icon(Icons.notifications_active_outlined, size: 18),
-                    label: const Text('Tester une notification'),
+                    label: const Text('Tester une notification immédiate'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.inkBlue,
                       foregroundColor: AppColors.paper,
@@ -148,6 +175,27 @@ class ReglagesScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _secondsLeft != null ? null : () => _scheduleTestReminder(context),
+                    icon: const Icon(Icons.alarm_outlined, size: 18),
+                    label: const Text('Tester un rappel programmé (60 s)'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.corail,
+                      foregroundColor: AppColors.paper,
+                      disabledBackgroundColor: AppColors.soot.withValues(alpha: 0.12),
+                      disabledForegroundColor: AppColors.soot.withValues(alpha: 0.4),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                if (_secondsLeft != null) ...[
+                  const SizedBox(height: 12),
+                  _countdownPanel(),
+                ],
               ],
             ),
           ),
@@ -167,6 +215,119 @@ class ReglagesScreen extends StatelessWidget {
               ? 'Notification envoyée. Si tu ne la vois pas, vérifie les autorisations de MémoTack.'
               : 'Impossible : les notifications ne sont pas autorisées pour MémoTack.',
         ),
+      ),
+    );
+  }
+
+  Future<void> _scheduleTestReminder(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final scheduled = await NotificationService.instance.scheduleTestReminder();
+    if (!mounted) return;
+
+    if (!scheduled) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Impossible : les notifications ne sont pas autorisées pour MémoTack.'),
+        ),
+      );
+      return;
+    }
+
+    _countdown?.cancel();
+    // On vise un instant absolu plutot que de decrementer un compteur : si
+    // l'ecran est mis en arriere-plan pendant le test — ce qui est le cas
+    // normal pour voir arriver la notification — le compte a rebours reste
+    // juste au retour.
+    _deadline = DateTime.now().add(kDebugScheduledDelay);
+    setState(() => _secondsLeft = kDebugScheduledDelay.inSeconds);
+
+    _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final deadline = _deadline;
+      if (!mounted || deadline == null) {
+        timer.cancel();
+        return;
+      }
+      final left = deadline.difference(DateTime.now()).inSeconds;
+      setState(() => _secondsLeft = left > 0 ? left : 0);
+      if (left <= 0) timer.cancel();
+    });
+  }
+
+  void _dismissCountdown() {
+    _countdown?.cancel();
+    _countdown = null;
+    _deadline = null;
+    setState(() => _secondsLeft = null);
+  }
+
+  Widget _countdownPanel() {
+    final left = _secondsLeft ?? 0;
+    final done = left <= 0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: (done ? AppColors.corail : AppColors.inkBlue).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!done) ...[
+            Row(
+              children: [
+                Text(
+                  '$left',
+                  style: TextStyle(
+                    color: AppColors.inkBlue,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    's',
+                    style: TextStyle(color: AppColors.inkBlue, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Rappel programmé. Tu peux quitter l\'application : la notification '
+              'doit arriver même écran éteint.',
+              style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12),
+            ),
+          ] else ...[
+            Text(
+              'La notification aurait dû apparaître.',
+              style: TextStyle(
+                color: AppColors.soot,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Si rien ne s\'est affiché, vérifie l\'optimisation de la batterie : '
+              'sur Xiaomi, Huawei, Samsung et OnePlus, elle bloque les alarmes '
+              'exactes même quand tout est correctement autorisé. Il faut exclure '
+              'MémoTack de l\'optimisation, et autoriser les alarmes et rappels '
+              'dans les paramètres de l\'application.',
+              style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _dismissCountdown,
+                child: Text('Fermer', style: TextStyle(color: AppColors.inkBlue)),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

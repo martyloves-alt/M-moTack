@@ -10,9 +10,23 @@ const String kChannelId = 'memotack_rappels';
 const String kChannelName = 'Rappels MémoTack';
 const String kChannelDescription = 'Rappels pour réviser tes mots et phrases';
 
-/// Identifiant reserve a la notification de diagnostic, hors de la plage
-/// utilisee par les rappels (qui numerotent a partir de 0).
+/// Nombre maximal de rappels reels programmes en une fois : deux jours de
+/// creneaux, au maximum 10 par jour (borne imposee par l'ecran Reglages).
+/// Les rappels reels occupent donc toujours les identifiants 0 a 19.
+const int kMaxReminderCount = 20;
+
+/// Identifiant de la notification de diagnostic immediate, hors de la plage
+/// des rappels reels.
 const int kDebugNotificationId = 999999;
+
+/// Identifiant du rappel de diagnostic programme a 60 s. Distinct de
+/// [kDebugNotificationId] pour que les deux tests puissent coexister, et lui
+/// aussi hors de la plage des rappels reels : une replanification ne doit
+/// jamais l'annuler.
+const int kDebugScheduledNotificationId = 999998;
+
+/// Duree par defaut avant le declenchement du rappel de diagnostic.
+const Duration kDebugScheduledDelay = Duration(seconds: 60);
 
 /// Un rappel effectivement remis au planificateur.
 class PlannedReminder {
@@ -33,7 +47,12 @@ class PlannedReminder {
 abstract class ReminderScheduler {
   /// Renvoie `true` si les notifications peuvent reellement etre affichees.
   Future<bool> init();
-  Future<void> cancelAll();
+
+  /// Annule un rappel precis. Volontairement plus fin qu'un `cancelAll()` :
+  /// une replanification ne doit annuler que les rappels reels, jamais les
+  /// notifications de diagnostic.
+  Future<void> cancel(int id);
+
   Future<void> schedule(PlannedReminder reminder);
   Future<void> showNow({required int id, required String title, required String body});
 }
@@ -98,11 +117,11 @@ class AndroidReminderScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> cancelAll() async {
+  Future<void> cancel(int id) async {
     try {
-      await _plugin.cancelAll();
+      await _plugin.cancel(id);
     } catch (e) {
-      debugPrint('MémoTack: annulation des rappels impossible ($e)');
+      debugPrint('MémoTack: annulation du rappel $id impossible ($e)');
     }
   }
 
@@ -212,7 +231,12 @@ class NotificationService {
     await init();
     if (!_ready) return;
 
-    await _scheduler.cancelAll();
+    // On annule la plage des rappels reels (0 a kMaxReminderCount - 1) plutot
+    // que d'appeler cancelAll() : un cancelAll() emporterait aussi le rappel
+    // de diagnostic programme, qui doit survivre a une replanification.
+    for (var id = 0; id < kMaxReminderCount; id++) {
+      await _scheduler.cancel(id);
+    }
 
     final reminders = planReminders(
       cards: cards,
@@ -239,6 +263,34 @@ class NotificationService {
       id: kDebugNotificationId,
       title: 'MémoTack',
       body: 'Notification de test — la chaîne fonctionne.',
+    );
+    return true;
+  }
+
+  /// Programme un rappel de diagnostic a `now + delay`, en empruntant
+  /// EXACTEMENT le chemin des vrais rappels : meme [ReminderScheduler], donc
+  /// meme `zonedSchedule()`, meme canal et meme receiver.
+  ///
+  /// C'est la difference avec [showTestNotification], qui affiche
+  /// immediatement sans passer par AlarmManager : si celle-ci s'affiche mais
+  /// pas celle-la, le probleme est bien du cote des alarmes.
+  ///
+  /// Son identifiant dedie la place hors de la plage annulee par
+  /// [rescheduleAll], donc ajouter une carte pendant le compte a rebours ne
+  /// l'annule pas.
+  Future<bool> scheduleTestReminder({
+    DateTime? now,
+    Duration delay = kDebugScheduledDelay,
+  }) async {
+    await init();
+    if (!_ready) return false;
+
+    await _scheduler.schedule(
+      PlannedReminder(
+        id: kDebugScheduledNotificationId,
+        body: 'Rappel programmé de test — la chaîne complète fonctionne.',
+        time: (now ?? DateTime.now()).add(delay),
+      ),
     );
     return true;
   }

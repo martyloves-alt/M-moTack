@@ -10,7 +10,7 @@ class FakeScheduler implements ReminderScheduler {
   final bool ready;
 
   int initCount = 0;
-  int cancelAllCount = 0;
+  final List<int> cancelled = [];
   final List<PlannedReminder> scheduled = [];
   final List<String> shownNow = [];
 
@@ -25,9 +25,9 @@ class FakeScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> cancelAll() async {
-    cancelAllCount++;
-    calls.add('cancelAll');
+  Future<void> cancel(int id) async {
+    cancelled.add(id);
+    calls.add('cancel');
   }
 
   @override
@@ -120,8 +120,26 @@ void main() {
 
       await service.rescheduleAll(cards: cards, settings: settings, now: now);
 
-      expect(fake.cancelAllCount, 1);
-      expect(fake.calls.indexOf('cancelAll'), lessThan(fake.calls.indexOf('schedule')));
+      expect(fake.calls.indexOf('cancel'), lessThan(fake.calls.indexOf('schedule')));
+    });
+
+    test('n annule que la plage des rappels reels, jamais les diagnostics', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final cards = [
+        card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0)),
+      ];
+
+      await service.rescheduleAll(cards: cards, settings: settings, now: now);
+
+      // Toute la plage des rappels reels est balayee...
+      expect(fake.cancelled, List<int>.generate(kMaxReminderCount, (i) => i));
+      // ...mais aucun identifiant de diagnostic n'est touche : un cancelAll()
+      // aurait emporte le rappel de test en cours.
+      expect(fake.cancelled, isNot(contains(kDebugNotificationId)));
+      expect(fake.cancelled, isNot(contains(kDebugScheduledNotificationId)));
     });
 
     test('plusieurs cartes dues recoivent des identifiants distincts', () async {
@@ -156,7 +174,7 @@ void main() {
 
       expect(service.isReady, isFalse);
       expect(fake.scheduled, isEmpty);
-      expect(fake.cancelAllCount, 0);
+      expect(fake.cancelled, isEmpty);
     });
 
     test('une permission refusee est retentee au prochain appel', () async {
@@ -224,6 +242,75 @@ void main() {
 
       expect(sent, isFalse);
       expect(fake.shownNow, isEmpty);
+    });
+  });
+
+  group('scheduleTestReminder', () {
+    test('appelle le planificateur avec une echeance future', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final scheduled = await service.scheduleTestReminder(now: now);
+
+      expect(scheduled, isTrue);
+      expect(fake.scheduled, hasLength(1));
+
+      final reminder = fake.scheduled.single;
+      expect(reminder.time.isAfter(now), isTrue);
+      expect(reminder.time, now.add(const Duration(seconds: 60)));
+    });
+
+    test('emprunte le meme chemin que les vrais rappels, pas showNow', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      // C'est tout l'interet du test : passer par schedule() donc
+      // zonedSchedule(), et non par un affichage immediat.
+      expect(fake.calls, contains('schedule'));
+      expect(fake.shownNow, isEmpty);
+    });
+
+    test('utilise un identifiant dedie, hors de la plage des rappels reels', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      final id = fake.scheduled.single.id;
+      expect(id, kDebugScheduledNotificationId);
+      expect(id, isNot(kDebugNotificationId));
+      expect(id, greaterThanOrEqualTo(kMaxReminderCount));
+    });
+
+    test('survit a une replanification des vrais rappels', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: now);
+      final testReminderId = fake.scheduled.single.id;
+
+      // L'utilisateur ajoute une carte pendant le compte a rebours.
+      await service.rescheduleAll(
+        cards: [card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0))],
+        settings: settings,
+        now: now,
+      );
+
+      expect(fake.cancelled, isNot(contains(testReminderId)));
+    });
+
+    test('ne programme rien si les notifications sont refusees', () async {
+      final fake = FakeScheduler(ready: false);
+      final service = NotificationService(scheduler: fake);
+
+      final scheduled = await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      expect(scheduled, isFalse);
+      expect(fake.scheduled, isEmpty);
     });
   });
 }
