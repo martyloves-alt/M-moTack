@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../notifications.dart';
 import '../storage.dart';
 import '../theme.dart';
 
@@ -117,7 +118,55 @@ class ReglagesScreen extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('DIAGNOSTIC', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
+                const SizedBox(height: 10),
+                Text(
+                  'Envoie une notification tout de suite. Si elle apparaît mais que '
+                  'les rappels programmés n\'arrivent jamais, le problème vient des '
+                  'alarmes, pas de l\'affichage.',
+                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _sendTestNotification(context),
+                    icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                    label: const Text('Tester une notification'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.inkBlue,
+                      foregroundColor: AppColors.paper,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _sendTestNotification(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final sent = await NotificationService.instance.showTestNotification();
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          sent
+              ? 'Notification envoyée. Si tu ne la vois pas, vérifie les autorisations de MémoTack.'
+              : 'Impossible : les notifications ne sont pas autorisées pour MémoTack.',
+        ),
       ),
     );
   }

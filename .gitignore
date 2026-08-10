@@ -6,3 +6,20 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android : `flutter create` regenere tout le dossier a chaque build, mais ne
+# remplace pas un fichier existant. Seul le manifeste est donc versionne, car
+# il porte les permissions et les receivers des rappels.
+android/*
+!android/app/
+android/app/*
+!android/app/src/
+android/app/src/*
+!android/app/src/main/
+android/app/src/main/*
+!android/app/src/main/AndroidManifest.xml
