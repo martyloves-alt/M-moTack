@@ -5,9 +5,12 @@ import 'package:memotack/notifications.dart';
 /// Planificateur factice : enregistre ce qui lui est demande, sans jamais
 /// toucher a la couche Android.
 class FakeScheduler implements ReminderScheduler {
-  FakeScheduler({this.ready = true});
+  FakeScheduler({this.ready = true, this.canScheduleExactAlarms = true});
 
   final bool ready;
+  final bool canScheduleExactAlarms;
+
+  int openExactAlarmSettingsCount = 0;
 
   int initCount = 0;
   final List<int> cancelled = [];
@@ -44,6 +47,23 @@ class FakeScheduler implements ReminderScheduler {
   }) async {
     shownNow.add(body);
     calls.add('showNow');
+  }
+
+  @override
+  Future<NotificationDiagnostics> diagnostics() async {
+    calls.add('diagnostics');
+    return NotificationDiagnostics(
+      notificationsEnabled: ready,
+      canScheduleExactAlarms: canScheduleExactAlarms,
+      pendingCount: scheduled.length,
+      appVersion: '0.2.0+1',
+    );
+  }
+
+  @override
+  Future<void> openExactAlarmSettings() async {
+    openExactAlarmSettingsCount++;
+    calls.add('openExactAlarmSettings');
   }
 }
 
@@ -311,6 +331,66 @@ void main() {
 
       expect(scheduled, isFalse);
       expect(fake.scheduled, isEmpty);
+    });
+  });
+
+  group('diagnostics', () {
+    test('remonte l etat de la chaine Android', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(d.notificationsEnabled, isTrue);
+      expect(d.canScheduleExactAlarms, isTrue);
+      expect(d.appVersion, '0.2.0+1');
+    });
+
+    test('reste lisible meme quand l initialisation a echoue', () async {
+      // C'est precisement le cas ou le diagnostic sert : il ne doit pas se
+      // couper en meme temps que le reste de la chaine.
+      final fake = FakeScheduler(ready: false);
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(service.isReady, isFalse);
+      expect(d.notificationsEnabled, isFalse);
+      expect(fake.calls, contains('diagnostics'));
+    });
+
+    test('signale les alarmes exactes refusees', () async {
+      final fake = FakeScheduler(canScheduleExactAlarms: false);
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(d.canScheduleExactAlarms, isFalse);
+    });
+
+    test('compte les rappels en attente', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      expect((await service.diagnostics()).pendingCount, 0);
+
+      await service.rescheduleAll(
+        cards: [card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0))],
+        settings: settings,
+        now: now,
+      );
+
+      expect((await service.diagnostics()).pendingCount, 1);
+    });
+
+    test('openExactAlarmSettings delegue au planificateur', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.openExactAlarmSettings();
+
+      expect(fake.openExactAlarmSettingsCount, 1);
     });
   });
 }

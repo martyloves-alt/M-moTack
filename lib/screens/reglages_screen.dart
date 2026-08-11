@@ -14,7 +14,7 @@ class ReglagesScreen extends StatefulWidget {
   State<ReglagesScreen> createState() => _ReglagesScreenState();
 }
 
-class _ReglagesScreenState extends State<ReglagesScreen> {
+class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObserver {
   AppState get appState => widget.appState;
 
   /// Secondes restantes avant le declenchement du rappel de test.
@@ -25,10 +25,41 @@ class _ReglagesScreenState extends State<ReglagesScreen> {
   /// Instant vise par le rappel de test, source de verite du compte a rebours.
   DateTime? _deadline;
 
+  NotificationDiagnostics? _diagnostics;
+  Timer? _diagnosticsRefresh;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshDiagnostics();
+    _diagnosticsRefresh = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _refreshDiagnostics(),
+    );
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _countdown?.cancel();
+    _diagnosticsRefresh?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Au retour de l'ecran systeme « Alarmes et rappels », la valeur doit
+    // basculer immediatement plutot qu'au prochain tick.
+    if (state == AppLifecycleState.resumed) {
+      _refreshDiagnostics();
+    }
+  }
+
+  Future<void> _refreshDiagnostics() async {
+    final result = await NotificationService.instance.diagnostics();
+    if (!mounted) return;
+    setState(() => _diagnostics = result);
   }
 
   int get _activeMinutes {
@@ -192,10 +223,27 @@ class _ReglagesScreenState extends State<ReglagesScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _openExactAlarmSettings,
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: const Text('Ouvrir « Alarmes et rappels »'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.inkBlue,
+                      side: BorderSide(color: AppColors.inkBlue.withValues(alpha: 0.4)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
                 if (_secondsLeft != null) ...[
                   const SizedBox(height: 12),
                   _countdownPanel(),
                 ],
+                const SizedBox(height: 12),
+                _diagnosticsPanel(),
               ],
             ),
           ),
@@ -251,6 +299,94 @@ class _ReglagesScreenState extends State<ReglagesScreen> {
       setState(() => _secondsLeft = left > 0 ? left : 0);
       if (left <= 0) timer.cancel();
     });
+  }
+
+  Future<void> _openExactAlarmSettings() async {
+    await NotificationService.instance.openExactAlarmSettings();
+    if (!mounted) return;
+    // Si la permission etait deja accordee, le plugin n'ouvre aucun ecran :
+    // le rafraichissement rend au moins l'etat courant visible.
+    await _refreshDiagnostics();
+  }
+
+  Widget _diagnosticsPanel() {
+    final d = _diagnostics;
+    if (d == null) {
+      return Text(
+        'Lecture de l\'état…',
+        style: TextStyle(color: AppColors.soot.withValues(alpha: 0.5), fontSize: 12),
+      );
+    }
+
+    // Le point decisif : sans alarmes exactes, les rappels retombent sur des
+    // alarmes inexactes, que le systeme peut retarder de plusieurs minutes.
+    final exactOk = d.canScheduleExactAlarms == true;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.soot.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('ÉTAT DU SYSTÈME', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.5))),
+          const SizedBox(height: 8),
+          _diagnosticRow('Notifications autorisées', _boolLabel(d.notificationsEnabled),
+              ok: d.notificationsEnabled == true),
+          _diagnosticRow('Alarmes exactes', _boolLabel(d.canScheduleExactAlarms), ok: exactOk),
+          _diagnosticRow('Rappels en attente', '${d.pendingCount}', ok: d.pendingCount > 0),
+          _diagnosticRow('Version', d.appVersion, neutral: true),
+          if (!exactOk) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Les alarmes exactes ne sont pas autorisées : c\'est ce qui empêche '
+              'les rappels programmés d\'arriver à l\'heure. Ouvre « Alarmes et '
+              'rappels » ci-dessus et autorise MémoTack.',
+              style: TextStyle(color: AppColors.corail, fontSize: 12, height: 1.4),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _boolLabel(bool? value) {
+    if (value == null) return 'inconnu';
+    return value ? 'oui' : 'non';
+  }
+
+  Widget _diagnosticRow(String label, String value, {bool ok = false, bool neutral = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12)),
+          Row(
+            children: [
+              if (!neutral) ...[
+                Icon(
+                  ok ? Icons.check_circle : Icons.cancel,
+                  size: 14,
+                  color: ok ? AppColors.sauge : AppColors.corail,
+                ),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                value,
+                style: TextStyle(
+                  color: neutral ? AppColors.soot.withValues(alpha: 0.7) : AppColors.soot,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   void _dismissCountdown() {
