@@ -5,12 +5,15 @@ import 'package:memotack/notifications.dart';
 /// Planificateur factice : enregistre ce qui lui est demande, sans jamais
 /// toucher a la couche Android.
 class FakeScheduler implements ReminderScheduler {
-  FakeScheduler({this.ready = true});
+  FakeScheduler({this.ready = true, this.canScheduleExactAlarms = true});
 
   final bool ready;
+  final bool canScheduleExactAlarms;
+
+  int openExactAlarmSettingsCount = 0;
 
   int initCount = 0;
-  int cancelAllCount = 0;
+  final List<int> cancelled = [];
   final List<PlannedReminder> scheduled = [];
   final List<String> shownNow = [];
 
@@ -25,9 +28,9 @@ class FakeScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> cancelAll() async {
-    cancelAllCount++;
-    calls.add('cancelAll');
+  Future<void> cancel(int id) async {
+    cancelled.add(id);
+    calls.add('cancel');
   }
 
   @override
@@ -44,6 +47,23 @@ class FakeScheduler implements ReminderScheduler {
   }) async {
     shownNow.add(body);
     calls.add('showNow');
+  }
+
+  @override
+  Future<NotificationDiagnostics> diagnostics() async {
+    calls.add('diagnostics');
+    return NotificationDiagnostics(
+      notificationsEnabled: ready,
+      canScheduleExactAlarms: canScheduleExactAlarms,
+      pendingCount: scheduled.length,
+      appVersion: '0.2.0+1',
+    );
+  }
+
+  @override
+  Future<void> openExactAlarmSettings() async {
+    openExactAlarmSettingsCount++;
+    calls.add('openExactAlarmSettings');
   }
 }
 
@@ -120,8 +140,26 @@ void main() {
 
       await service.rescheduleAll(cards: cards, settings: settings, now: now);
 
-      expect(fake.cancelAllCount, 1);
-      expect(fake.calls.indexOf('cancelAll'), lessThan(fake.calls.indexOf('schedule')));
+      expect(fake.calls.indexOf('cancel'), lessThan(fake.calls.indexOf('schedule')));
+    });
+
+    test('n annule que la plage des rappels reels, jamais les diagnostics', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final cards = [
+        card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0)),
+      ];
+
+      await service.rescheduleAll(cards: cards, settings: settings, now: now);
+
+      // Toute la plage des rappels reels est balayee...
+      expect(fake.cancelled, List<int>.generate(kMaxReminderCount, (i) => i));
+      // ...mais aucun identifiant de diagnostic n'est touche : un cancelAll()
+      // aurait emporte le rappel de test en cours.
+      expect(fake.cancelled, isNot(contains(kDebugNotificationId)));
+      expect(fake.cancelled, isNot(contains(kDebugScheduledNotificationId)));
     });
 
     test('plusieurs cartes dues recoivent des identifiants distincts', () async {
@@ -156,7 +194,7 @@ void main() {
 
       expect(service.isReady, isFalse);
       expect(fake.scheduled, isEmpty);
-      expect(fake.cancelAllCount, 0);
+      expect(fake.cancelled, isEmpty);
     });
 
     test('une permission refusee est retentee au prochain appel', () async {
@@ -224,6 +262,135 @@ void main() {
 
       expect(sent, isFalse);
       expect(fake.shownNow, isEmpty);
+    });
+  });
+
+  group('scheduleTestReminder', () {
+    test('appelle le planificateur avec une echeance future', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final scheduled = await service.scheduleTestReminder(now: now);
+
+      expect(scheduled, isTrue);
+      expect(fake.scheduled, hasLength(1));
+
+      final reminder = fake.scheduled.single;
+      expect(reminder.time.isAfter(now), isTrue);
+      expect(reminder.time, now.add(const Duration(seconds: 60)));
+    });
+
+    test('emprunte le meme chemin que les vrais rappels, pas showNow', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      // C'est tout l'interet du test : passer par schedule() donc
+      // zonedSchedule(), et non par un affichage immediat.
+      expect(fake.calls, contains('schedule'));
+      expect(fake.shownNow, isEmpty);
+    });
+
+    test('utilise un identifiant dedie, hors de la plage des rappels reels', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      final id = fake.scheduled.single.id;
+      expect(id, kDebugScheduledNotificationId);
+      expect(id, isNot(kDebugNotificationId));
+      expect(id, greaterThanOrEqualTo(kMaxReminderCount));
+    });
+
+    test('survit a une replanification des vrais rappels', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: now);
+      final testReminderId = fake.scheduled.single.id;
+
+      // L'utilisateur ajoute une carte pendant le compte a rebours.
+      await service.rescheduleAll(
+        cards: [card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0))],
+        settings: settings,
+        now: now,
+      );
+
+      expect(fake.cancelled, isNot(contains(testReminderId)));
+    });
+
+    test('ne programme rien si les notifications sont refusees', () async {
+      final fake = FakeScheduler(ready: false);
+      final service = NotificationService(scheduler: fake);
+
+      final scheduled = await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      expect(scheduled, isFalse);
+      expect(fake.scheduled, isEmpty);
+    });
+  });
+
+  group('diagnostics', () {
+    test('remonte l etat de la chaine Android', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(d.notificationsEnabled, isTrue);
+      expect(d.canScheduleExactAlarms, isTrue);
+      expect(d.appVersion, '0.2.0+1');
+    });
+
+    test('reste lisible meme quand l initialisation a echoue', () async {
+      // C'est precisement le cas ou le diagnostic sert : il ne doit pas se
+      // couper en meme temps que le reste de la chaine.
+      final fake = FakeScheduler(ready: false);
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(service.isReady, isFalse);
+      expect(d.notificationsEnabled, isFalse);
+      expect(fake.calls, contains('diagnostics'));
+    });
+
+    test('signale les alarmes exactes refusees', () async {
+      final fake = FakeScheduler(canScheduleExactAlarms: false);
+      final service = NotificationService(scheduler: fake);
+
+      final d = await service.diagnostics();
+
+      expect(d.canScheduleExactAlarms, isFalse);
+    });
+
+    test('compte les rappels en attente', () async {
+      final now = DateTime(2026, 1, 1, 9, 0);
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      expect((await service.diagnostics()).pendingCount, 0);
+
+      await service.rescheduleAll(
+        cards: [card(id: 'a', front: 'Anasarque', nextReviewAt: DateTime(2026, 1, 1, 8, 0))],
+        settings: settings,
+        now: now,
+      );
+
+      expect((await service.diagnostics()).pendingCount, 1);
+    });
+
+    test('openExactAlarmSettings delegue au planificateur', () async {
+      final fake = FakeScheduler();
+      final service = NotificationService(scheduler: fake);
+
+      await service.openExactAlarmSettings();
+
+      expect(fake.openExactAlarmSettingsCount, 1);
     });
   });
 }

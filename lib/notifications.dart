@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -10,9 +11,51 @@ const String kChannelId = 'memotack_rappels';
 const String kChannelName = 'Rappels MémoTack';
 const String kChannelDescription = 'Rappels pour réviser tes mots et phrases';
 
-/// Identifiant reserve a la notification de diagnostic, hors de la plage
-/// utilisee par les rappels (qui numerotent a partir de 0).
+/// Nombre maximal de rappels reels programmes en une fois : deux jours de
+/// creneaux, au maximum 10 par jour (borne imposee par l'ecran Reglages).
+/// Les rappels reels occupent donc toujours les identifiants 0 a 19.
+const int kMaxReminderCount = 20;
+
+/// Identifiant de la notification de diagnostic immediate, hors de la plage
+/// des rappels reels.
 const int kDebugNotificationId = 999999;
+
+/// Identifiant du rappel de diagnostic programme a 60 s. Distinct de
+/// [kDebugNotificationId] pour que les deux tests puissent coexister, et lui
+/// aussi hors de la plage des rappels reels : une replanification ne doit
+/// jamais l'annuler.
+const int kDebugScheduledNotificationId = 999998;
+
+/// Duree par defaut avant le declenchement du rappel de diagnostic.
+const Duration kDebugScheduledDelay = Duration(seconds: 60);
+
+/// Etat reel de la chaine de notification, lu depuis Android.
+///
+/// Sert a distinguer les pannes qui se ressemblent vues de l'exterieur : une
+/// notification programmee qui n'arrive pas peut venir d'une permission
+/// refusee, d'alarmes exactes non autorisees, ou d'une alarme jamais posee.
+class NotificationDiagnostics {
+  /// `null` quand Android n'a pas su repondre (ou hors Android).
+  final bool? notificationsEnabled;
+
+  /// Correspond a `AlarmManager.canScheduleExactAlarms()`. A `false`, les
+  /// rappels retombent sur des alarmes inexactes, que Doze peut retarder de
+  /// plusieurs minutes : un test a 60 s semble alors ne rien declencher.
+  final bool? canScheduleExactAlarms;
+
+  /// Nombre d'alarmes reellement en attente cote Android.
+  final int pendingCount;
+
+  /// Version de l'application installee, lue depuis l'APK.
+  final String appVersion;
+
+  const NotificationDiagnostics({
+    required this.notificationsEnabled,
+    required this.canScheduleExactAlarms,
+    required this.pendingCount,
+    required this.appVersion,
+  });
+}
 
 /// Un rappel effectivement remis au planificateur.
 class PlannedReminder {
@@ -33,9 +76,20 @@ class PlannedReminder {
 abstract class ReminderScheduler {
   /// Renvoie `true` si les notifications peuvent reellement etre affichees.
   Future<bool> init();
-  Future<void> cancelAll();
+
+  /// Annule un rappel precis. Volontairement plus fin qu'un `cancelAll()` :
+  /// une replanification ne doit annuler que les rappels reels, jamais les
+  /// notifications de diagnostic.
+  Future<void> cancel(int id);
+
   Future<void> schedule(PlannedReminder reminder);
   Future<void> showNow({required int id, required String title, required String body});
+
+  /// Lit l'etat courant de la chaine Android.
+  Future<NotificationDiagnostics> diagnostics();
+
+  /// Ouvre l'ecran systeme « Alarmes et rappels ».
+  Future<void> openExactAlarmSettings();
 }
 
 /// Implementation reelle, adossee a flutter_local_notifications.
@@ -98,11 +152,11 @@ class AndroidReminderScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> cancelAll() async {
+  Future<void> cancel(int id) async {
     try {
-      await _plugin.cancelAll();
+      await _plugin.cancel(id);
     } catch (e) {
-      debugPrint('MémoTack: annulation des rappels impossible ($e)');
+      debugPrint('MémoTack: annulation du rappel $id impossible ($e)');
     }
   }
 
@@ -150,6 +204,64 @@ class AndroidReminderScheduler implements ReminderScheduler {
       await _plugin.show(id, title, body, _details);
     } catch (e) {
       debugPrint('MémoTack: notification immediate impossible ($e)');
+    }
+  }
+
+  @override
+  Future<NotificationDiagnostics> diagnostics() async {
+    // Volontairement tolerant : le diagnostic doit rester lisible meme quand
+    // la chaine est cassee, c'est justement le cas qu'il sert a expliquer.
+    bool? enabled;
+    bool? exact;
+    var pending = 0;
+    var version = 'inconnue';
+
+    final androidImpl = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    try {
+      enabled = await androidImpl?.areNotificationsEnabled();
+    } catch (e) {
+      debugPrint('MémoTack: areNotificationsEnabled indisponible ($e)');
+    }
+
+    try {
+      exact = await androidImpl?.canScheduleExactNotifications();
+    } catch (e) {
+      debugPrint('MémoTack: canScheduleExactNotifications indisponible ($e)');
+    }
+
+    try {
+      pending = (await _plugin.pendingNotificationRequests()).length;
+    } catch (e) {
+      debugPrint('MémoTack: pendingNotificationRequests indisponible ($e)');
+    }
+
+    try {
+      final info = await PackageInfo.fromPlatform();
+      version = '${info.version}+${info.buildNumber}';
+    } catch (e) {
+      debugPrint('MémoTack: version de l\'application indisponible ($e)');
+    }
+
+    return NotificationDiagnostics(
+      notificationsEnabled: enabled,
+      canScheduleExactAlarms: exact,
+      pendingCount: pending,
+      appVersion: version,
+    );
+  }
+
+  @override
+  Future<void> openExactAlarmSettings() async {
+    try {
+      // Ouvre ACTION_REQUEST_SCHEDULE_EXACT_ALARM. Note : le plugin
+      // n'ouvre l'ecran que si la permission n'est PAS deja accordee.
+      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidImpl?.requestExactAlarmsPermission();
+    } catch (e) {
+      debugPrint('MémoTack: ouverture des reglages d\'alarme impossible ($e)');
     }
   }
 }
@@ -212,7 +324,12 @@ class NotificationService {
     await init();
     if (!_ready) return;
 
-    await _scheduler.cancelAll();
+    // On annule la plage des rappels reels (0 a kMaxReminderCount - 1) plutot
+    // que d'appeler cancelAll() : un cancelAll() emporterait aussi le rappel
+    // de diagnostic programme, qui doit survivre a une replanification.
+    for (var id = 0; id < kMaxReminderCount; id++) {
+      await _scheduler.cancel(id);
+    }
 
     final reminders = planReminders(
       cards: cards,
@@ -242,4 +359,45 @@ class NotificationService {
     );
     return true;
   }
+
+  /// Programme un rappel de diagnostic a `now + delay`, en empruntant
+  /// EXACTEMENT le chemin des vrais rappels : meme [ReminderScheduler], donc
+  /// meme `zonedSchedule()`, meme canal et meme receiver.
+  ///
+  /// C'est la difference avec [showTestNotification], qui affiche
+  /// immediatement sans passer par AlarmManager : si celle-ci s'affiche mais
+  /// pas celle-la, le probleme est bien du cote des alarmes.
+  ///
+  /// Son identifiant dedie la place hors de la plage annulee par
+  /// [rescheduleAll], donc ajouter une carte pendant le compte a rebours ne
+  /// l'annule pas.
+  Future<bool> scheduleTestReminder({
+    DateTime? now,
+    Duration delay = kDebugScheduledDelay,
+  }) async {
+    await init();
+    if (!_ready) return false;
+
+    await _scheduler.schedule(
+      PlannedReminder(
+        id: kDebugScheduledNotificationId,
+        body: 'Rappel programmé de test — la chaîne complète fonctionne.',
+        time: (now ?? DateTime.now()).add(delay),
+      ),
+    );
+    return true;
+  }
+
+  /// Etat courant de la chaine Android.
+  ///
+  /// Contrairement aux autres methodes, celle-ci ne s'interrompt PAS quand
+  /// l'initialisation a echoue : c'est justement dans ce cas qu'il faut
+  /// pouvoir lire pourquoi.
+  Future<NotificationDiagnostics> diagnostics() async {
+    await init();
+    return _scheduler.diagnostics();
+  }
+
+  /// Ouvre l'ecran systeme « Alarmes et rappels ».
+  Future<void> openExactAlarmSettings() => _scheduler.openExactAlarmSettings();
 }
