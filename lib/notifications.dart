@@ -29,6 +29,42 @@ const int kDebugScheduledNotificationId = 999998;
 /// Duree par defaut avant le declenchement du rappel de diagnostic.
 const Duration kDebugScheduledDelay = Duration(seconds: 60);
 
+/// Resultat brut de la derniere tentative de planification.
+///
+/// Existe parce qu'une planification peut echouer sans que rien ne le
+/// signale : l'appel rend la main normalement, mais aucune alarme n'est
+/// posee. Ce compte rendu rend l'echec visible au lieu de le deviner.
+class ScheduleAttempt {
+  final int id;
+
+  /// Instant demande, en heure locale de l'appareil.
+  final DateTime requestedTime;
+
+  /// Instant reellement transmis a Android, apres conversion de fuseau.
+  /// Le comparer a [requestedTime] revele une erreur de fuseau.
+  final String resolvedTime;
+
+  /// 'exact', 'inexact' (repli) ou 'echec'.
+  final String mode;
+
+  final bool success;
+
+  /// Message brut de l'exception, sans reformulation.
+  final String? error;
+
+  final DateTime at;
+
+  const ScheduleAttempt({
+    required this.id,
+    required this.requestedTime,
+    required this.resolvedTime,
+    required this.mode,
+    required this.success,
+    required this.at,
+    this.error,
+  });
+}
+
 /// Etat reel de la chaine de notification, lu depuis Android.
 ///
 /// Sert a distinguer les pannes qui se ressemblent vues de l'exterieur : une
@@ -49,11 +85,19 @@ class NotificationDiagnostics {
   /// Version de l'application installee, lue depuis l'APK.
   final String appVersion;
 
+  /// Dernier message d'erreur capte, quelle qu'en soit l'origine.
+  final String? lastError;
+
+  /// Compte rendu de la derniere tentative de planification.
+  final ScheduleAttempt? lastAttempt;
+
   const NotificationDiagnostics({
     required this.notificationsEnabled,
     required this.canScheduleExactAlarms,
     required this.pendingCount,
     required this.appVersion,
+    this.lastError,
+    this.lastAttempt,
   });
 }
 
@@ -82,7 +126,10 @@ abstract class ReminderScheduler {
   /// notifications de diagnostic.
   Future<void> cancel(int id);
 
-  Future<void> schedule(PlannedReminder reminder);
+  /// Renvoie le compte rendu de la tentative : un echec ne doit jamais
+  /// pouvoir passer pour un succes.
+  Future<ScheduleAttempt> schedule(PlannedReminder reminder);
+
   Future<void> showNow({required int id, required String title, required String body});
 
   /// Lit l'etat courant de la chaine Android.
@@ -94,7 +141,17 @@ abstract class ReminderScheduler {
 
 /// Implementation reelle, adossee a flutter_local_notifications.
 class AndroidReminderScheduler implements ReminderScheduler {
+  // Constructeur factory singleton cote plugin : la meme instance planifie et
+  // repond a pendingNotificationRequests().
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+
+  String? _lastError;
+  ScheduleAttempt? _lastAttempt;
+
+  void _captureError(String context, Object error) {
+    _lastError = '$context : $error';
+    debugPrint('MémoTack: $_lastError');
+  }
 
   static const AndroidNotificationDetails _androidDetails = AndroidNotificationDetails(
     kChannelId,
@@ -146,7 +203,7 @@ class AndroidReminderScheduler implements ReminderScheduler {
 
       return true;
     } catch (e) {
-      debugPrint('MémoTack: initialisation des notifications impossible ($e)');
+      _captureError('Initialisation', e);
       return false;
     }
   }
@@ -156,13 +213,22 @@ class AndroidReminderScheduler implements ReminderScheduler {
     try {
       await _plugin.cancel(id);
     } catch (e) {
-      debugPrint('MémoTack: annulation du rappel $id impossible ($e)');
+      _captureError('Annulation du rappel $id', e);
     }
   }
 
   @override
-  Future<void> schedule(PlannedReminder reminder) async {
-    final when = tz.TZDateTime.from(reminder.time, tz.local);
+  Future<ScheduleAttempt> schedule(PlannedReminder reminder) async {
+    tz.TZDateTime when;
+    try {
+      when = tz.TZDateTime.from(reminder.time, tz.local);
+    } catch (e) {
+      // Fuseau non initialise : l'appel echouerait plus loin sans expliquer
+      // pourquoi.
+      return _record(reminder, '(conversion impossible)', 'echec',
+          success: false, error: 'Conversion de fuseau : $e');
+    }
+
     try {
       await _plugin.zonedSchedule(
         reminder.id,
@@ -174,9 +240,11 @@ class AndroidReminderScheduler implements ReminderScheduler {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-    } catch (_) {
+      return _record(reminder, when.toString(), 'exact', success: true);
+    } catch (exactError) {
       // L'utilisateur n'a pas accorde les alarmes exactes : mieux vaut un
-      // rappel approximatif que pas de rappel du tout.
+      // rappel approximatif que pas de rappel du tout. On conserve tout de
+      // meme la premiere erreur, qui explique le repli.
       try {
         await _plugin.zonedSchedule(
           reminder.id,
@@ -188,10 +256,38 @@ class AndroidReminderScheduler implements ReminderScheduler {
           uiLocalNotificationDateInterpretation:
               UILocalNotificationDateInterpretation.absoluteTime,
         );
-      } catch (e) {
-        debugPrint('MémoTack: rappel ${reminder.id} impossible a programmer ($e)');
+        return _record(reminder, when.toString(), 'inexact',
+            success: true, error: 'Repli après échec exact : $exactError');
+      } catch (inexactError) {
+        return _record(reminder, when.toString(), 'echec',
+            success: false,
+            error: 'exact: $exactError | inexact: $inexactError');
       }
     }
+  }
+
+  ScheduleAttempt _record(
+    PlannedReminder reminder,
+    String resolvedTime,
+    String mode, {
+    required bool success,
+    String? error,
+  }) {
+    final attempt = ScheduleAttempt(
+      id: reminder.id,
+      requestedTime: reminder.time,
+      resolvedTime: resolvedTime,
+      mode: mode,
+      success: success,
+      error: error,
+      at: DateTime.now(),
+    );
+    _lastAttempt = attempt;
+    if (error != null) {
+      _lastError = error;
+      debugPrint('MémoTack: rappel ${reminder.id} — $error');
+    }
+    return attempt;
   }
 
   @override
@@ -203,7 +299,7 @@ class AndroidReminderScheduler implements ReminderScheduler {
     try {
       await _plugin.show(id, title, body, _details);
     } catch (e) {
-      debugPrint('MémoTack: notification immediate impossible ($e)');
+      _captureError('Notification immédiate', e);
     }
   }
 
@@ -222,26 +318,26 @@ class AndroidReminderScheduler implements ReminderScheduler {
     try {
       enabled = await androidImpl?.areNotificationsEnabled();
     } catch (e) {
-      debugPrint('MémoTack: areNotificationsEnabled indisponible ($e)');
+      _captureError('areNotificationsEnabled', e);
     }
 
     try {
       exact = await androidImpl?.canScheduleExactNotifications();
     } catch (e) {
-      debugPrint('MémoTack: canScheduleExactNotifications indisponible ($e)');
+      _captureError('canScheduleExactNotifications', e);
     }
 
     try {
       pending = (await _plugin.pendingNotificationRequests()).length;
     } catch (e) {
-      debugPrint('MémoTack: pendingNotificationRequests indisponible ($e)');
+      _captureError('pendingNotificationRequests', e);
     }
 
     try {
       final info = await PackageInfo.fromPlatform();
       version = '${info.version}+${info.buildNumber}';
     } catch (e) {
-      debugPrint('MémoTack: version de l\'application indisponible ($e)');
+      _captureError('Version de l\'application', e);
     }
 
     return NotificationDiagnostics(
@@ -249,6 +345,8 @@ class AndroidReminderScheduler implements ReminderScheduler {
       canScheduleExactAlarms: exact,
       pendingCount: pending,
       appVersion: version,
+      lastError: _lastError,
+      lastAttempt: _lastAttempt,
     );
   }
 
@@ -261,7 +359,7 @@ class AndroidReminderScheduler implements ReminderScheduler {
           AndroidFlutterLocalNotificationsPlugin>();
       await androidImpl?.requestExactAlarmsPermission();
     } catch (e) {
-      debugPrint('MémoTack: ouverture des reglages d\'alarme impossible ($e)');
+      _captureError('Ouverture des réglages d\'alarme', e);
     }
   }
 }
@@ -378,14 +476,17 @@ class NotificationService {
     await init();
     if (!_ready) return false;
 
-    await _scheduler.schedule(
+    // On renvoie le succes REEL de la planification, pas le simple fait
+    // d'avoir appele le planificateur : sans cela, un echec silencieux
+    // lancerait quand meme le compte a rebours.
+    final attempt = await _scheduler.schedule(
       PlannedReminder(
         id: kDebugScheduledNotificationId,
         body: 'Rappel programmé de test — la chaîne complète fonctionne.',
         time: (now ?? DateTime.now()).add(delay),
       ),
     );
-    return true;
+    return attempt.success;
   }
 
   /// Etat courant de la chaine Android.

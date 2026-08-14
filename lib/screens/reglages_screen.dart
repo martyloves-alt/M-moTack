@@ -210,7 +210,10 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _secondsLeft != null ? null : () => _scheduleTestReminder(context),
+                    // Desactive UNIQUEMENT pendant le decompte. A zero le
+                    // bouton redevient actif : sinon il restait grise apres le
+                    // premier test, et un tap semblait ne rien faire.
+                    onPressed: (_secondsLeft ?? 0) > 0 ? null : () => _scheduleTestReminder(context),
                     icon: const Icon(Icons.alarm_outlined, size: 18),
                     label: const Text('Tester un rappel programmé (60 s)'),
                     style: ElevatedButton.styleFrom(
@@ -273,9 +276,12 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
     if (!mounted) return;
 
     if (!scheduled) {
+      // L'echec est desormais reel, pas suppose : le detail est dans
+      // « Dernière erreur » juste en dessous.
+      await _refreshDiagnostics();
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Impossible : les notifications ne sont pas autorisées pour MémoTack.'),
+          content: Text('Planification échouée — voir « Dernière erreur » ci-dessous.'),
         ),
       );
       return;
@@ -347,7 +353,64 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
               style: TextStyle(color: AppColors.corail, fontSize: 12, height: 1.4),
             ),
           ],
+          const SizedBox(height: 10),
+          Divider(color: AppColors.soot.withValues(alpha: 0.12), height: 1),
+          const SizedBox(height: 10),
+          Text('DERNIÈRE PLANIFICATION', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.5))),
+          const SizedBox(height: 6),
+          _lastAttemptBlock(d.lastAttempt),
+          const SizedBox(height: 10),
+          Text('DERNIÈRE ERREUR', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.5))),
+          const SizedBox(height: 6),
+          _monospace(d.lastError ?? 'aucune', isError: d.lastError != null),
         ],
+      ),
+    );
+  }
+
+  Widget _lastAttemptBlock(ScheduleAttempt? a) {
+    if (a == null) {
+      return _monospace('aucune tentative depuis le lancement');
+    }
+
+    // Volontairement brut : c'est ce que l'appel a reellement fait, pas une
+    // reformulation. requestedTime vs resolvedTime revele un ecart de fuseau.
+    final lines = [
+      'id       : ${a.id}',
+      'mode     : ${a.mode}',
+      'succès   : ${a.success ? 'oui' : 'NON'}',
+      'demandé  : ${a.requestedTime}',
+      'transmis : ${a.resolvedTime}',
+      'à        : ${a.at}',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _monospace(lines.join('\n'), isError: !a.success),
+        if (a.error != null) ...[
+          const SizedBox(height: 6),
+          _monospace(a.error!, isError: true),
+        ],
+      ],
+    );
+  }
+
+  Widget _monospace(String text, {bool isError = false}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: (isError ? AppColors.corail : AppColors.soot).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: SelectableText(
+        text,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 11,
+          height: 1.4,
+          color: isError ? AppColors.corail : AppColors.soot.withValues(alpha: 0.8),
+        ),
       ),
     );
   }
