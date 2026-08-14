@@ -1,7 +1,7 @@
 name: memotack
 description: Application de mémorisation par répétition espacée (mots et phrases courtes).
 publish_to: 'none'
-version: 0.2.0
+version: 0.2.1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

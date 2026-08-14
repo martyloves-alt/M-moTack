@@ -5,10 +5,20 @@ import 'package:memotack/notifications.dart';
 /// Planificateur factice : enregistre ce qui lui est demande, sans jamais
 /// toucher a la couche Android.
 class FakeScheduler implements ReminderScheduler {
-  FakeScheduler({this.ready = true, this.canScheduleExactAlarms = true});
+  FakeScheduler({
+    this.ready = true,
+    this.canScheduleExactAlarms = true,
+    this.scheduleFails = false,
+  });
 
   final bool ready;
   final bool canScheduleExactAlarms;
+
+  /// Simule une planification qui echoue cote Android sans lever d'exception
+  /// jusqu'a l'appelant — le scenario exact observe sur Samsung.
+  final bool scheduleFails;
+
+  ScheduleAttempt? lastAttempt;
 
   int openExactAlarmSettingsCount = 0;
 
@@ -34,9 +44,21 @@ class FakeScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> schedule(PlannedReminder reminder) async {
-    scheduled.add(reminder);
+  Future<ScheduleAttempt> schedule(PlannedReminder reminder) async {
     calls.add('schedule');
+    final attempt = ScheduleAttempt(
+      id: reminder.id,
+      requestedTime: reminder.time,
+      resolvedTime: reminder.time.toString(),
+      mode: scheduleFails ? 'echec' : 'exact',
+      success: !scheduleFails,
+      error: scheduleFails ? 'PlatformException(error, simulé, null, null)' : null,
+      at: DateTime(2026, 1, 1, 9, 0),
+    );
+    lastAttempt = attempt;
+    // Une planification qui echoue ne laisse aucune alarme en attente.
+    if (!scheduleFails) scheduled.add(reminder);
+    return attempt;
   }
 
   @override
@@ -57,6 +79,8 @@ class FakeScheduler implements ReminderScheduler {
       canScheduleExactAlarms: canScheduleExactAlarms,
       pendingCount: scheduled.length,
       appVersion: '0.2.0+1',
+      lastError: lastAttempt?.error,
+      lastAttempt: lastAttempt,
     );
   }
 
@@ -332,6 +356,19 @@ void main() {
       expect(scheduled, isFalse);
       expect(fake.scheduled, isEmpty);
     });
+
+    test('signale false quand la planification echoue reellement', () async {
+      // Regression : le compte a rebours demarrait meme quand aucune alarme
+      // n'etait posee, parce que le succes n'etait jamais verifie.
+      final fake = FakeScheduler(scheduleFails: true);
+      final service = NotificationService(scheduler: fake);
+
+      final scheduled = await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+
+      expect(scheduled, isFalse);
+      expect(fake.calls, contains('schedule'));
+      expect(fake.scheduled, isEmpty);
+    });
   });
 
   group('diagnostics', () {
@@ -382,6 +419,21 @@ void main() {
       );
 
       expect((await service.diagnostics()).pendingCount, 1);
+    });
+
+    test('expose l erreur brute et le compte rendu de planification', () async {
+      final fake = FakeScheduler(scheduleFails: true);
+      final service = NotificationService(scheduler: fake);
+
+      await service.scheduleTestReminder(now: DateTime(2026, 1, 1, 9, 0));
+      final d = await service.diagnostics();
+
+      expect(d.lastError, contains('PlatformException'));
+      expect(d.lastAttempt, isNotNull);
+      expect(d.lastAttempt!.success, isFalse);
+      expect(d.lastAttempt!.mode, 'echec');
+      // Le symptome observe : rien en attente malgre un appel effectue.
+      expect(d.pendingCount, 0);
     });
 
     test('openExactAlarmSettings delegue au planificateur', () async {
