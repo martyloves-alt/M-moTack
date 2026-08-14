@@ -3,6 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+  # Verifie la build release AVANT le merge : c'est la seule etape qui
+  # exerce reellement R8, donc les regles ProGuard des rappels programmes.
+  # Les tests Dart ne peuvent pas les couvrir.
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
