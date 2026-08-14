@@ -15,35 +15,32 @@ jobs:
         with:
           channel: 'stable'
 
+      # Complete le dossier android/ (gradle, ressources...) sans toucher aux
+      # fichiers versionnes : AndroidManifest.xml, build.gradle.kts et
+      # proguard-rules.pro sont conserves tels quels.
       - name: Generer le dossier Android
         run: flutter create --platforms=android .
 
-      - name: Activer le desugaring pour flutter_local_notifications
+      # Le desugaring etait auparavant injecte ici par sed. Il vit desormais
+      # dans android/app/build.gradle.kts, versionne : reappliquer le sed
+      # ajouterait un second bloc dependencies par-dessus.
+      - name: Verifier la configuration Android versionnee
         run: |
-          if [ -f android/app/build.gradle.kts ]; then
-            FILE=android/app/build.gradle.kts
-            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$FILE"
-            {
-              echo ""
-              echo "dependencies {"
-              echo "    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")"
-              echo "}"
-            } >> "$FILE"
-            echo "Desugaring active dans $FILE"
-          elif [ -f android/app/build.gradle ]; then
-            FILE=android/app/build.gradle
-            sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$FILE"
-            {
-              echo ""
-              echo "dependencies {"
-              echo "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
-              echo "}"
-            } >> "$FILE"
-            echo "Desugaring active dans $FILE"
-          else
-            echo "Fichier build.gradle introuvable dans android/app"
-            exit 1
-          fi
+          set -e
+          for f in \
+            android/app/src/main/AndroidManifest.xml \
+            android/app/build.gradle.kts \
+            android/app/proguard-rules.pro
+          do
+            [ -f "$f" ] || { echo "Fichier manquant : $f"; exit 1; }
+          done
+          grep -q "isCoreLibraryDesugaringEnabled = true" android/app/build.gradle.kts \
+            || { echo "Desugaring absent de build.gradle.kts"; exit 1; }
+          grep -q "proguard-rules.pro" android/app/build.gradle.kts \
+            || { echo "Regles ProGuard non referencees"; exit 1; }
+          grep -q "keepattributes Signature" android/app/proguard-rules.pro \
+            || { echo "Regle Gson Signature absente"; exit 1; }
+          echo "Configuration Android versionnee intacte apres flutter create."
 
       - name: Installer les dependances
         run: flutter pub get
