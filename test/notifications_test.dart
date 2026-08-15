@@ -2,110 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:memotack/models.dart';
 import 'package:memotack/notifications.dart';
 
-/// Planificateur factice : enregistre ce qui lui est demande, sans jamais
-/// toucher a la couche Android.
-class FakeScheduler implements ReminderScheduler {
-  FakeScheduler({
-    this.ready = true,
-    this.canScheduleExactAlarms = true,
-    this.scheduleFails = false,
-  });
-
-  final bool ready;
-  final bool canScheduleExactAlarms;
-
-  /// Simule une planification qui echoue cote Android sans lever d'exception
-  /// jusqu'a l'appelant — le scenario exact observe sur Samsung.
-  final bool scheduleFails;
-
-  ScheduleAttempt? lastAttempt;
-
-  int openExactAlarmSettingsCount = 0;
-
-  int initCount = 0;
-  final List<int> cancelled = [];
-  final List<PlannedReminder> scheduled = [];
-  final List<String> shownNow = [];
-
-  /// Ordre d'appel, pour verifier que l'annulation precede la planification.
-  final List<String> calls = [];
-
-  @override
-  Future<bool> init() async {
-    initCount++;
-    calls.add('init');
-    return ready;
-  }
-
-  @override
-  Future<void> cancel(int id) async {
-    cancelled.add(id);
-    calls.add('cancel');
-  }
-
-  @override
-  Future<ScheduleAttempt> schedule(PlannedReminder reminder) async {
-    calls.add('schedule');
-    final attempt = ScheduleAttempt(
-      id: reminder.id,
-      requestedTime: reminder.time,
-      resolvedTime: reminder.time.toString(),
-      mode: scheduleFails ? 'echec' : 'exact',
-      success: !scheduleFails,
-      error: scheduleFails ? 'PlatformException(error, simulé, null, null)' : null,
-      at: DateTime(2026, 1, 1, 9, 0),
-    );
-    lastAttempt = attempt;
-    // Une planification qui echoue ne laisse aucune alarme en attente.
-    if (!scheduleFails) scheduled.add(reminder);
-    return attempt;
-  }
-
-  @override
-  Future<void> showNow({
-    required int id,
-    required String title,
-    required String body,
-  }) async {
-    shownNow.add(body);
-    calls.add('showNow');
-  }
-
-  @override
-  Future<NotificationDiagnostics> diagnostics() async {
-    calls.add('diagnostics');
-    return NotificationDiagnostics(
-      notificationsEnabled: ready,
-      canScheduleExactAlarms: canScheduleExactAlarms,
-      pendingCount: scheduled.length,
-      appVersion: '0.2.0+1',
-      lastError: lastAttempt?.error,
-      lastAttempt: lastAttempt,
-    );
-  }
-
-  @override
-  Future<void> openExactAlarmSettings() async {
-    openExactAlarmSettingsCount++;
-    calls.add('openExactAlarmSettings');
-  }
-}
-
-Flashcard card({
-  required String id,
-  required String front,
-  required DateTime nextReviewAt,
-}) {
-  return Flashcard(
-    id: id,
-    front: front,
-    back: '',
-    tagId: 'medical',
-    level: 0,
-    nextReviewAt: nextReviewAt,
-    createdAt: nextReviewAt,
-  );
-}
+import 'fake_scheduler.dart';
 
 void main() {
   // Reglages par defaut : 4 rappels/jour entre 08:00 et 23:00.
@@ -380,7 +277,7 @@ void main() {
 
       expect(d.notificationsEnabled, isTrue);
       expect(d.canScheduleExactAlarms, isTrue);
-      expect(d.appVersion, '0.2.0+1');
+      expect(d.appVersion, kFakeAppVersion);
     });
 
     test('reste lisible meme quand l initialisation a echoue', () async {

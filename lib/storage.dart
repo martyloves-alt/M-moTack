@@ -16,6 +16,13 @@ List<Tag> defaultTags() => const [
     ];
 
 class AppState extends ChangeNotifier {
+  /// [notifications] n'est injecte que par les tests : la couche Android
+  /// n'est pas disponible sous `flutter test`.
+  AppState({NotificationService? notifications})
+      : _notifications = notifications ?? NotificationService.instance;
+
+  final NotificationService _notifications;
+
   List<Flashcard> cards = [];
   List<Tag> tags = defaultTags();
   Settings settings = Settings.defaults;
@@ -47,7 +54,7 @@ class AppState extends ChangeNotifier {
 
     isLoaded = true;
     notifyListeners();
-    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
+    await _notifications.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> _saveCards() async {
@@ -67,20 +74,32 @@ class AppState extends ChangeNotifier {
     cards = [...cards, card];
     notifyListeners();
     await _saveCards();
-    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
+    await _notifications.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> updateCard(Flashcard updated) async {
     cards = cards.map((c) => c.id == updated.id ? updated : c).toList();
     notifyListeners();
     await _saveCards();
-    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
+    await _notifications.rescheduleAll(cards: cards, settings: settings);
+  }
+
+  /// Supprime une carte et reprogramme les rappels.
+  ///
+  /// La replanification n'est pas optionnelle : les rappels deja poses
+  /// portent le recto de la carte. Sans elle, une notification arriverait
+  /// pour une carte qui n'existe plus.
+  Future<void> deleteCard(String id) async {
+    cards = cards.where((c) => c.id != id).toList();
+    notifyListeners();
+    await _saveCards();
+    await _notifications.rescheduleAll(cards: cards, settings: settings);
   }
 
   Future<void> updateSettings(Settings updated) async {
     settings = updated;
     notifyListeners();
     await _saveSettings();
-    await NotificationService.instance.rescheduleAll(cards: cards, settings: settings);
+    await _notifications.rescheduleAll(cards: cards, settings: settings);
   }
 }

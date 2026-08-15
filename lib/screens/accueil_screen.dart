@@ -4,6 +4,7 @@ import '../engine.dart';
 import '../models.dart';
 import '../storage.dart';
 import '../theme.dart';
+import 'ajouter_screen.dart';
 
 class AccueilScreen extends StatelessWidget {
   final AppState appState;
@@ -192,10 +193,87 @@ class _CardTile extends StatelessWidget {
                 Text(dueLabel, style: stampStyle(size: 9, color: AppColors.soot.withValues(alpha: 0.5))),
               ],
             ),
+            // Menu plutot que deux boutons visibles : la liste reste lisible,
+            // et les actions destructrices ne sont pas a portee de pouce.
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
+                iconSize: 18,
+                tooltip: 'Actions',
+                icon: Icon(Icons.more_vert, color: AppColors.soot.withValues(alpha: 0.4)),
+                color: AppColors.paper,
+                onSelected: (value) {
+                  if (value == 'edit') _openEdit(context);
+                  if (value == 'delete') _confirmDelete(context);
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 16, color: AppColors.soot),
+                        const SizedBox(width: 8),
+                        Text('Modifier', style: TextStyle(color: AppColors.soot, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_outline, size: 16, color: AppColors.corail),
+                        const SizedBox(width: 8),
+                        Text('Supprimer', style: TextStyle(color: AppColors.corail, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  void _openEdit(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AjouterScreen(appState: appState, cardToEdit: card),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        title: Text('Supprimer cette carte ?', style: TextStyle(color: AppColors.soot, fontSize: 17)),
+        content: Text(
+          '« ${card.front} » sera retirée du carnet, avec sa progression. '
+          'Ses rappels programmés seront annulés.',
+          style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text('Annuler', style: TextStyle(color: AppColors.soot)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Supprimer', style: TextStyle(color: AppColors.corail)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await appState.deleteCard(card.id);
+    }
   }
 
   String _formatFuture(DateTime date) {
