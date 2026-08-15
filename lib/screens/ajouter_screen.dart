@@ -7,7 +7,12 @@ import '../theme.dart';
 
 class AjouterScreen extends StatefulWidget {
   final AppState appState;
-  const AjouterScreen({super.key, required this.appState});
+
+  /// Non nul en mode edition : le formulaire est pre-rempli et
+  /// l'enregistrement met a jour la carte au lieu d'en creer une.
+  final Flashcard? cardToEdit;
+
+  const AjouterScreen({super.key, required this.appState, this.cardToEdit});
 
   @override
   State<AjouterScreen> createState() => _AjouterScreenState();
@@ -18,10 +23,19 @@ class _AjouterScreenState extends State<AjouterScreen> {
   final _backController = TextEditingController();
   late String _selectedTagId;
 
+  bool get _isEditing => widget.cardToEdit != null;
+
   @override
   void initState() {
     super.initState();
-    _selectedTagId = widget.appState.tags.first.id;
+    final editing = widget.cardToEdit;
+    if (editing != null) {
+      _frontController.text = editing.front;
+      _backController.text = editing.back;
+      _selectedTagId = editing.tagId;
+    } else {
+      _selectedTagId = widget.appState.tags.first.id;
+    }
   }
 
   @override
@@ -34,6 +48,22 @@ class _AjouterScreenState extends State<AjouterScreen> {
   void _submit() {
     final front = _frontController.text.trim();
     if (front.isEmpty) return;
+
+    final editing = widget.cardToEdit;
+    if (editing != null) {
+      // copyWith ne touche ni au niveau, ni a nextReviewAt, ni a createdAt :
+      // corriger une faute de frappe ne doit pas reinitialiser la
+      // progression Leitner de la carte.
+      widget.appState.updateCard(
+        editing.copyWith(
+          front: front,
+          back: _backController.text.trim(),
+          tagId: _selectedTagId,
+        ),
+      );
+      Navigator.pop(context);
+      return;
+    }
 
     final card = createFlashcard(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -67,7 +97,7 @@ class _AjouterScreenState extends State<AjouterScreen> {
         backgroundColor: AppColors.ink,
         elevation: 0,
         title: Text(
-          'Ajouter un élément',
+          _isEditing ? 'Modifier la carte' : 'Ajouter un élément',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.paper, fontSize: 18),
         ),
       ),
@@ -182,9 +212,17 @@ class _AjouterScreenState extends State<AjouterScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               onPressed: _submit,
-              child: const Text('Ajouter au carnet'),
+              child: Text(_isEditing ? 'Enregistrer les modifications' : 'Ajouter au carnet'),
             ),
           ),
+          if (_isEditing) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Le niveau et la date de prochaine révision sont conservés.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.paperMuted, fontSize: 11),
+            ),
+          ],
         ],
       ),
     );
