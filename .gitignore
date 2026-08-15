@@ -13,11 +13,16 @@ coverage/
 .flutter-plugins-dependencies
 
 # Android : `flutter create` regenere tout le dossier a chaque build, mais ne
-# remplace pas un fichier existant. Seul le manifeste est donc versionne, car
-# il porte les permissions et les receivers des rappels.
+# remplace pas un fichier existant. On ne versionne donc que les fichiers qui
+# portent une configuration indispensable aux rappels :
+#   - AndroidManifest.xml : permissions et receivers ;
+#   - build.gradle.kts    : desugaring et activation des regles R8 ;
+#   - proguard-rules.pro  : regles Gson sans lesquelles zonedSchedule echoue.
 android/*
 !android/app/
 android/app/*
+!android/app/build.gradle.kts
+!android/app/proguard-rules.pro
 !android/app/src/
 android/app/src/*
 !android/app/src/main/
