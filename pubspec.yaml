@@ -1,7 +1,7 @@
 name: memotack
 description: Application de mémorisation par répétition espacée (mots et phrases courtes).
 publish_to: 'none'
-version: 0.3.0
+version: 0.4.0
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -14,6 +14,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   timezone: ^0.9.0
   package_info_plus: ^10.2.1
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
