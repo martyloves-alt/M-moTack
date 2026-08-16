@@ -209,6 +209,33 @@ class SpeechService {
     }
   }
 
+  /// Lit un unique segment et rend la main a la fin de l'enonce.
+  ///
+  /// Contrairement a [speakCard], n'enchaine rien : l'ecran de lecture
+  /// pilote lui-meme la progression, ce qui lui permet de sauter d'un
+  /// segment a l'autre.
+  Future<SpeechOutcome> speakSegment(
+    String text, {
+    required Settings settings,
+  }) async {
+    if (!settings.speechEnabled) return SpeechOutcome.disabled;
+    if (!await _prepare(settings)) return SpeechOutcome.noEngine;
+
+    _speaking = true;
+    try {
+      await _engine.speak(text);
+      return SpeechOutcome.spoken;
+    } catch (e) {
+      debugPrintSafe(
+        'MémoTack: lecture impossible ($e)',
+        sensitive: [text],
+      );
+      return SpeechOutcome.failed;
+    } finally {
+      _speaking = false;
+    }
+  }
+
   /// Interrompt toute lecture. Appele aussi en quittant un ecran, pour
   /// qu'aucune voix ne continue en arriere-plan.
   Future<void> stop() async {
