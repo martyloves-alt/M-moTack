@@ -97,5 +97,18 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+
+        <!--
+            Synthese vocale (flutter_tts).
+
+            Depuis Android 11 (API 30), une application ne voit les autres
+            que si elle les declare ici. Sans cette entree, le moteur TTS
+            est invisible : getLanguages() renvoie une liste vide et la
+            lecture echoue silencieusement, comme s'il n'y avait aucun
+            moteur installe. Le plugin ne la declare pas lui-meme.
+        -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>

@@ -126,11 +126,26 @@ class Settings {
   final String activeHoursEnd; // "HH:mm"
   final AppTheme theme;
 
+  /// Lecture vocale des cartes.
+  final bool speechEnabled;
+
+  /// Vitesse de lecture, de kMinSpeechRate à kMaxSpeechRate (0,5 = normal).
+  final double speechRate;
+
+  /// Hauteur de voix, de kMinSpeechPitch à kMaxSpeechPitch (1,0 = normal).
+  final double speechPitch;
+
+  // Les trois champs vocaux ont une valeur par defaut : ils sont arrives
+  // apres coup, et une construction de Settings qui ne parle pas de voix
+  // n'a pas a s'en preoccuper.
   const Settings({
     required this.remindersPerDay,
     required this.activeHoursStart,
     required this.activeHoursEnd,
     required this.theme,
+    this.speechEnabled = true,
+    this.speechRate = 0.5,
+    this.speechPitch = 1.0,
   });
 
   static const Settings defaults = Settings(
@@ -145,12 +160,18 @@ class Settings {
     String? activeHoursStart,
     String? activeHoursEnd,
     AppTheme? theme,
+    bool? speechEnabled,
+    double? speechRate,
+    double? speechPitch,
   }) {
     return Settings(
       remindersPerDay: remindersPerDay ?? this.remindersPerDay,
       activeHoursStart: activeHoursStart ?? this.activeHoursStart,
       activeHoursEnd: activeHoursEnd ?? this.activeHoursEnd,
       theme: theme ?? this.theme,
+      speechEnabled: speechEnabled ?? this.speechEnabled,
+      speechRate: speechRate ?? this.speechRate,
+      speechPitch: speechPitch ?? this.speechPitch,
     );
   }
 
@@ -159,8 +180,14 @@ class Settings {
         'activeHoursStart': activeHoursStart,
         'activeHoursEnd': activeHoursEnd,
         'theme': theme == AppTheme.dark ? 'dark' : 'light',
+        'speechEnabled': speechEnabled,
+        'speechRate': speechRate,
+        'speechPitch': speechPitch,
       };
 
+  /// Les trois champs vocaux sont lus avec une valeur de repli : les
+  /// reglages deja enregistres sur l'appareil ne les contiennent pas, et
+  /// une lecture stricte ferait echouer le chargement.
   factory Settings.fromJson(Map<String, dynamic> json) => Settings(
         remindersPerDay: json['remindersPerDay'] as int,
         activeHoursStart: json['activeHoursStart'] as String,
@@ -168,6 +195,12 @@ class Settings {
         theme: (json['theme'] as String) == 'dark'
             ? AppTheme.dark
             : AppTheme.light,
+        speechEnabled:
+            json['speechEnabled'] as bool? ?? defaults.speechEnabled,
+        speechRate:
+            (json['speechRate'] as num?)?.toDouble() ?? defaults.speechRate,
+        speechPitch:
+            (json['speechPitch'] as num?)?.toDouble() ?? defaults.speechPitch,
       );
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../engine.dart';
 import '../models.dart';
+import '../speech.dart';
 import '../storage.dart';
 import '../theme.dart';
 import 'ajouter_screen.dart';
@@ -193,6 +194,17 @@ class _CardTile extends StatelessWidget {
                 Text(dueLabel, style: stampStyle(size: 9, color: AppColors.soot.withValues(alpha: 0.5))),
               ],
             ),
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 18,
+                tooltip: 'Écouter',
+                icon: Icon(Icons.volume_up_outlined, color: AppColors.soot.withValues(alpha: 0.4)),
+                onPressed: () => _speak(context),
+              ),
+            ),
             // Menu plutot que deux boutons visibles : la liste reste lisible,
             // et les actions destructrices ne sont pas a portee de pouce.
             SizedBox(
@@ -235,6 +247,20 @@ class _CardTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _speak(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final outcome = await SpeechService.instance.speakCard(
+      front: card.front,
+      back: card.back,
+      settings: appState.settings,
+    );
+    if (outcome == SpeechOutcome.spoken) return;
+
+    messenger.showSnackBar(
+      SnackBar(content: Text(speechOutcomeMessage(outcome))),
     );
   }
 
@@ -302,9 +328,21 @@ class _CardTile extends StatelessWidget {
                 children: [
                   Text(tag.name, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12)),
                   const SizedBox(height: 8),
-                  Text(
-                    card.front,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: AppColors.soot),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          card.front,
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: AppColors.soot),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Écouter',
+                        icon: Icon(Icons.volume_up_outlined, color: AppColors.inkBlue),
+                        onPressed: () => _speak(sheetContext),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   if (card.back.isNotEmpty)
@@ -358,6 +396,8 @@ class _CardTile extends StatelessWidget {
           },
         );
       },
-    );
+      // Fermer la fiche coupe la lecture : aucune voix ne doit continuer
+      // apres la disparition de la carte qu'elle enonce.
+    ).whenComplete(() => SpeechService.instance.stop());
   }
 }

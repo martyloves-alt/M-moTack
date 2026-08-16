@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../notifications.dart';
+import '../speech.dart';
 import '../storage.dart';
 import '../theme.dart';
 
@@ -179,6 +180,64 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('LECTURE VOCALE', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  activeThumbColor: AppColors.inkBlue,
+                  title: Text('Lire les cartes à voix haute',
+                      style: TextStyle(color: AppColors.soot, fontSize: 14)),
+                  subtitle: Text(
+                    'Le recto, une courte pause, puis le verso.',
+                    style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12),
+                  ),
+                  value: settings.speechEnabled,
+                  onChanged: (value) {
+                    // Couper le son doit faire taire une lecture deja lancee.
+                    if (!value) SpeechService.instance.stop();
+                    appState.updateSettings(settings.copyWith(speechEnabled: value));
+                  },
+                ),
+                if (settings.speechEnabled) ...[
+                  const SizedBox(height: 4),
+                  _slider(
+                    label: 'Vitesse',
+                    value: settings.speechRate,
+                    min: kMinSpeechRate,
+                    max: kMaxSpeechRate,
+                    onChanged: (v) =>
+                        appState.updateSettings(settings.copyWith(speechRate: v)),
+                  ),
+                  _slider(
+                    label: 'Hauteur',
+                    value: settings.speechPitch,
+                    min: kMinSpeechPitch,
+                    max: kMaxSpeechPitch,
+                    onChanged: (v) =>
+                        appState.updateSettings(settings.copyWith(speechPitch: v)),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _previewSpeech(context),
+                      icon: const Icon(Icons.volume_up_outlined, size: 16),
+                      label: const Text('Écouter un exemple'),
+                      style: TextButton.styleFrom(foregroundColor: AppColors.inkBlue),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text('DIAGNOSTIC', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
                 const SizedBox(height: 10),
                 Text(
@@ -305,6 +364,55 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
       setState(() => _secondsLeft = left > 0 ? left : 0);
       if (left <= 0) timer.cancel();
     });
+  }
+
+  Widget _slider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 62,
+          child: Text(label, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12)),
+        ),
+        Expanded(
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            activeColor: AppColors.inkBlue,
+            inactiveColor: AppColors.soot.withValues(alpha: 0.15),
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 34,
+          child: Text(
+            value.toStringAsFixed(1).replaceAll('.', ','),
+            textAlign: TextAlign.right,
+            style: TextStyle(color: AppColors.soot, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _previewSpeech(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final outcome = await SpeechService.instance.speakCard(
+      front: 'Anasarque',
+      back: 'Œdème généralisé du tissu sous-cutané.',
+      settings: appState.settings,
+    );
+    if (outcome == SpeechOutcome.spoken) return;
+
+    messenger.showSnackBar(
+      SnackBar(content: Text(speechOutcomeMessage(outcome))),
+    );
   }
 
   Future<void> _openExactAlarmSettings() async {

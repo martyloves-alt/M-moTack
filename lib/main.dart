@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'speech.dart';
 import 'theme.dart';
 import 'storage.dart';
 import 'screens/accueil_screen.dart';
@@ -56,8 +57,30 @@ class RootScreen extends StatefulWidget {
   State<RootScreen> createState() => _RootScreenState();
 }
 
-class _RootScreenState extends State<RootScreen> {
+class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
   int tabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SpeechService.instance.stop();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Quitter l'application coupe la lecture : aucune voix ne doit
+    // continuer en arriere-plan.
+    if (state != AppLifecycleState.resumed) {
+      SpeechService.instance.stop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +94,11 @@ class _RootScreenState extends State<RootScreen> {
       body: IndexedStack(index: tabIndex, children: screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: tabIndex,
-        onDestinationSelected: (i) => setState(() => tabIndex = i),
+        onDestinationSelected: (i) {
+          // Changer d'onglet interrompt la lecture en cours.
+          SpeechService.instance.stop();
+          setState(() => tabIndex = i);
+        },
         backgroundColor: AppColors.inkLight,
         indicatorColor: AppColors.corail.withValues(alpha: 0.2),
         destinations: const [
