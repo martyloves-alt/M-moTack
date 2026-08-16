@@ -13,6 +13,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # `secrets` n'est pas lisible dans un `if:` d'etape : on projette
+      # seulement la PRESENCE du secret, jamais sa valeur.
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,13 +49,78 @@ jobs:
             || { echo "Regles ProGuard non referencees"; exit 1; }
           grep -q "keepattributes Signature" android/app/proguard-rules.pro \
             || { echo "Regle Gson Signature absente"; exit 1; }
+          # Un keystore versionne est un keystore compromis : il faudrait en
+          # changer, donc perdre la possibilite de mettre a jour l'application
+          # deja installee. On refuse le build plutot que de le laisser passer.
+          if git ls-files | grep -qE '\.(jks|keystore)$|(^|/)key\.properties$'; then
+            echo "Un fichier de signature est versionné dans le dépôt :"
+            git ls-files | grep -E '\.(jks|keystore)$|(^|/)key\.properties$'
+            exit 1
+          fi
           echo "Configuration Android versionnee intacte apres flutter create."
+
+      # Signature stable. Sans elle, Gradle retombe sur la cle de debug, que
+      # le runner regenere a chaque execution : chaque APK porterait une
+      # signature differente, Android refuserait la mise a jour et imposerait
+      # une desinstallation, qui detruit les donnees de l'utilisateur.
+      #
+      # Rien n'est affiche ici : ni le keystore, ni les mots de passe, ni le
+      # fichier key.properties. Les secrets ne transitent que par des
+      # variables d'environnement, que GitHub masque dans les journaux.
+      - name: Installer la cle de signature
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          # Le fichier est cree avec des droits restreints avant d'etre rempli.
+          install -m 600 /dev/null android/key.properties
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+          } > android/key.properties
+          chmod 600 android/app/upload-keystore.jks
+          echo "Clé de signature installée."
+
+      # Sur main, un APK non signable est un APK que personne ne pourra
+      # installer par-dessus le precedent : mieux vaut echouer ici.
+      - name: Exiger une signature stable sur main
+        if: github.ref == 'refs/heads/main' && env.HAS_KEYSTORE != 'true'
+        run: |
+          echo "ANDROID_KEYSTORE_BASE64 absent des secrets du dépôt."
+          echo "Sans lui, l'APK serait signé avec une clé de debug régénérée"
+          echo "à chaque run, et chaque mise à jour effacerait les données."
+          exit 1
 
       - name: Installer les dependances
         run: flutter pub get
 
       - name: Construire l'APK
         run: flutter build apk --release
+
+      # L'empreinte du certificat est une donnee publique, presente dans tout
+      # APK distribue : l'afficher ne revele rien de la cle privee, et permet
+      # de verifier d'un run a l'autre que la signature n'a pas change.
+      - name: Afficher l empreinte de signature
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs \
+            build/app/outputs/flutter-apk/app-release.apk \
+            | grep -i "SHA-256 digest" || true
+
+      # Le keystore ne doit pas survivre au job, meme en cas d'echec.
+      - name: Effacer la cle de signature
+        if: always()
+        run: |
+          rm -f android/app/upload-keystore.jks android/key.properties
+          echo "Clé de signature effacée du runner."
 
       - name: Mettre l'APK a disposition
         uses: actions/upload-artifact@v4

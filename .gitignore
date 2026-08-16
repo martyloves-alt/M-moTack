@@ -12,6 +12,14 @@ coverage/
 .flutter-plugins
 .flutter-plugins-dependencies
 
+# Signature Android : ne doit JAMAIS entrer dans le depot.
+# Un keystore publie est un keystore a remplacer, et remplacer une cle de
+# signature veut dire que plus aucune mise a jour ne s'installe par-dessus
+# l'application deja en place.
+*.jks
+*.keystore
+key.properties
+
 # Android : `flutter create` regenere tout le dossier a chaque build, mais ne
 # remplace pas un fichier existant. On ne versionne donc que les fichiers qui
 # portent une configuration indispensable aux rappels :
