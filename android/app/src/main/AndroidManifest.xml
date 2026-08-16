@@ -25,10 +25,21 @@
 
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!--
+        Sauvegarde automatique desactivee.
+
+        Par defaut, Android recopie les donnees de l'application vers Google
+        Drive. Les cartes sortiraient donc de l'appareil, hors du Keystore
+        qui les protege, vers un stockage que l'utilisateur ne controle pas.
+        Le transfert entre appareils passe par l'export chiffre de l'ecran
+        Reglages, protege par un mot de passe choisi par l'utilisateur.
+    -->
     <application
         android:label="MémoTack"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -6,6 +6,7 @@ import '../speech.dart';
 import '../storage.dart';
 import '../theme.dart';
 import 'ajouter_screen.dart';
+import 'lecture_screen.dart';
 
 class AccueilScreen extends StatelessWidget {
   final AppState appState;
@@ -202,7 +203,7 @@ class _CardTile extends StatelessWidget {
                 iconSize: 18,
                 tooltip: 'Écouter',
                 icon: Icon(Icons.volume_up_outlined, color: AppColors.soot.withValues(alpha: 0.4)),
-                onPressed: () => _speak(context),
+                onPressed: () => _openLecture(context),
               ),
             ),
             // Menu plutot que deux boutons visibles : la liste reste lisible,
@@ -250,17 +251,17 @@ class _CardTile extends StatelessWidget {
     );
   }
 
-  Future<void> _speak(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final outcome = await SpeechService.instance.speakCard(
-      front: card.front,
-      back: card.back,
-      settings: appState.settings,
-    );
-    if (outcome == SpeechOutcome.spoken) return;
-
-    messenger.showSnackBar(
-      SnackBar(content: Text(speechOutcomeMessage(outcome))),
+  /// Ouvre l'ecran de lecture, qui demarre l'enonce.
+  ///
+  /// La tuile tronque volontairement le verso ; c'est la qu'on accede au
+  /// contenu entier, avec les commandes de lecture.
+  void _openLecture(BuildContext context) {
+    SpeechService.instance.stop();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LectureScreen(appState: appState, card: card, tag: tag),
+      ),
     );
   }
 
@@ -340,7 +341,7 @@ class _CardTile extends StatelessWidget {
                       IconButton(
                         tooltip: 'Écouter',
                         icon: Icon(Icons.volume_up_outlined, color: AppColors.inkBlue),
-                        onPressed: () => _speak(sheetContext),
+                        onPressed: () => _openLecture(sheetContext),
                       ),
                     ],
                   ),

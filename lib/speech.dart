@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'logging.dart';
 import 'models.dart';
 
 /// Langue visee. Le repli est gere dans [SpeechService] : si aucune voix
@@ -196,10 +197,42 @@ class SpeechService {
       }
       return SpeechOutcome.spoken;
     } catch (e) {
-      debugPrint('MémoTack: lecture impossible ($e)');
+      // Le moteur a recu le texte de la carte : son message d'erreur peut le
+      // reprendre tel quel.
+      debugPrintSafe(
+        'MémoTack: lecture impossible ($e)',
+        sensitive: [front, back],
+      );
       return SpeechOutcome.failed;
     } finally {
       if (generation == _generation) _speaking = false;
+    }
+  }
+
+  /// Lit un unique segment et rend la main a la fin de l'enonce.
+  ///
+  /// Contrairement a [speakCard], n'enchaine rien : l'ecran de lecture
+  /// pilote lui-meme la progression, ce qui lui permet de sauter d'un
+  /// segment a l'autre.
+  Future<SpeechOutcome> speakSegment(
+    String text, {
+    required Settings settings,
+  }) async {
+    if (!settings.speechEnabled) return SpeechOutcome.disabled;
+    if (!await _prepare(settings)) return SpeechOutcome.noEngine;
+
+    _speaking = true;
+    try {
+      await _engine.speak(text);
+      return SpeechOutcome.spoken;
+    } catch (e) {
+      debugPrintSafe(
+        'MémoTack: lecture impossible ($e)',
+        sensitive: [text],
+      );
+      return SpeechOutcome.failed;
+    } finally {
+      _speaking = false;
     }
   }
 

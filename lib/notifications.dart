@@ -5,6 +5,7 @@ import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import 'engine.dart';
+import 'logging.dart';
 import 'models.dart';
 
 const String kChannelId = 'memotack_rappels';
@@ -279,13 +280,16 @@ class AndroidReminderScheduler implements ReminderScheduler {
       resolvedTime: resolvedTime,
       mode: mode,
       success: success,
-      error: error,
+      error: error == null ? null : redactSecrets(error, [reminder.body]),
       at: DateTime.now(),
     );
     _lastAttempt = attempt;
     if (error != null) {
-      _lastError = error;
-      debugPrint('MémoTack: rappel ${reminder.id} — $error');
+      // Le message vient d'un appel qui portait le recto de la carte : on le
+      // retire avant de le stocker, car _lastError est aussi affiche dans la
+      // carte Diagnostic.
+      _lastError = redactSecrets(error, [reminder.body]);
+      debugPrint('MémoTack: rappel ${reminder.id} — $_lastError');
     }
     return attempt;
   }
