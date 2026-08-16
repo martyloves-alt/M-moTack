@@ -4,7 +4,7 @@ import 'package:memotack/notifications.dart';
 /// Version renvoyee par le faux planificateur. Exposee en constante pour que
 /// les tests ne la repetent pas : sinon chaque montee de version cassait une
 /// assertion sans rapport.
-const String kFakeAppVersion = '0.4.0+1';
+const String kFakeAppVersion = '0.5.0+1';
 
 /// Planificateur factice : enregistre ce qui lui est demande, sans jamais
 /// toucher a la couche Android.

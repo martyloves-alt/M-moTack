@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'logging.dart';
 import 'models.dart';
 
 /// Langue visee. Le repli est gere dans [SpeechService] : si aucune voix
@@ -196,7 +197,12 @@ class SpeechService {
       }
       return SpeechOutcome.spoken;
     } catch (e) {
-      debugPrint('MémoTack: lecture impossible ($e)');
+      // Le moteur a recu le texte de la carte : son message d'erreur peut le
+      // reprendre tel quel.
+      debugPrintSafe(
+        'MémoTack: lecture impossible ($e)',
+        sensitive: [front, back],
+      );
       return SpeechOutcome.failed;
     } finally {
       if (generation == _generation) _speaking = false;

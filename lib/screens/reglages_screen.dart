@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../backup.dart';
 import '../notifications.dart';
 import '../speech.dart';
 import '../storage.dart';
@@ -166,6 +168,57 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
                         label: 'Fin',
                         value: settings.activeHoursEnd,
                         onPicked: (v) => appState.updateSettings(settings.copyWith(activeHoursEnd: v)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SAUVEGARDE CHIFFRÉE', style: stampStyle(color: AppColors.soot.withValues(alpha: 0.6))),
+                const SizedBox(height: 6),
+                Text(
+                  'Tes cartes ne quittent jamais l\'appareil toutes seules : la '
+                  'sauvegarde automatique d\'Android est désactivée. Pour changer '
+                  'de téléphone, exporte-les dans un fichier chiffré par un mot '
+                  'de passe que toi seul connais.',
+                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _exportCards(context),
+                        icon: const Icon(Icons.lock_outline, size: 16),
+                        label: const Text('Exporter'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.inkBlue,
+                          side: BorderSide(color: AppColors.inkBlue.withValues(alpha: 0.4)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _importCards(context),
+                        icon: const Icon(Icons.lock_open_outlined, size: 16),
+                        label: const Text('Importer'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.inkBlue,
+                          side: BorderSide(color: AppColors.inkBlue.withValues(alpha: 0.4)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
                       ),
                     ),
                   ],
@@ -364,6 +417,234 @@ class _ReglagesScreenState extends State<ReglagesScreen> with WidgetsBindingObse
       setState(() => _secondsLeft = left > 0 ? left : 0);
       if (left <= 0) timer.cancel();
     });
+  }
+
+  /// Demande un mot de passe. [confirm] impose une seconde saisie, pour
+  /// l'export : un mot de passe mal tape rendrait la sauvegarde
+  /// definitivement illisible.
+  Future<String?> _askPassword(BuildContext context, {required bool confirm}) {
+    final controller = TextEditingController();
+    final confirmController = TextEditingController();
+    String? error;
+
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.paper,
+          title: Text(
+            confirm ? 'Choisis un mot de passe' : 'Mot de passe de la sauvegarde',
+            style: TextStyle(color: AppColors.soot, fontSize: 17),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (confirm)
+                Text(
+                  'Il protège le fichier exporté. Sans lui, personne ne pourra '
+                  'le relire — pas même moi.',
+                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12),
+                ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                autofocus: true,
+                style: TextStyle(color: AppColors.soot),
+                decoration: const InputDecoration(labelText: 'Mot de passe'),
+              ),
+              if (confirm)
+                TextField(
+                  controller: confirmController,
+                  obscureText: true,
+                  style: TextStyle(color: AppColors.soot),
+                  decoration: const InputDecoration(labelText: 'Confirmation'),
+                ),
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                Text(error!, style: TextStyle(color: AppColors.corail, fontSize: 12)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Annuler', style: TextStyle(color: AppColors.soot)),
+            ),
+            TextButton(
+              onPressed: () {
+                final value = controller.text;
+                if (value.length < kMinPasswordLength) {
+                  setDialogState(() => error =
+                      'Au moins $kMinPasswordLength caractères.');
+                  return;
+                }
+                if (confirm && value != confirmController.text) {
+                  setDialogState(() => error = 'Les deux saisies diffèrent.');
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: Text('Valider', style: TextStyle(color: AppColors.inkBlue)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportCards(BuildContext context) async {
+    if (appState.cards.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucune carte à exporter.')),
+      );
+      return;
+    }
+
+    final password = await _askPassword(context, confirm: true);
+    if (password == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final archive = await exportCardsInBackground(cards: appState.cards, password: password);
+      if (!mounted) return;
+      await _showArchive(archive);
+    } on BackupException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Affiche la sauvegarde chiffree pour que l'utilisateur la copie.
+  ///
+  /// Le texte est deja chiffre : l'exposer ainsi ne revele rien, et evite
+  /// d'ajouter une permission d'ecriture de fichier.
+  Future<void> _showArchive(String archive) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        title: Text('Sauvegarde chiffrée', style: TextStyle(color: AppColors.soot, fontSize: 17)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Copie ce texte et garde-le en lieu sûr. Il est inutilisable '
+                'sans ton mot de passe.',
+                style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 180),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.soot.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    archive,
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: AppColors.soot),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: archive));
+              Navigator.pop(dialogContext);
+            },
+            child: Text('Copier', style: TextStyle(color: AppColors.inkBlue)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Fermer', style: TextStyle(color: AppColors.soot)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _importCards(BuildContext context) async {
+    final archive = await _askArchive(context);
+    if (archive == null || !mounted) return;
+
+    final password = await _askPassword(context, confirm: false);
+    if (password == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final imported = await importCardsInBackground(archive: archive, password: password);
+      if (!mounted) return;
+
+      final confirmed = await _confirmReplace(imported.length);
+      if (confirmed != true || !mounted) return;
+
+      await appState.replaceCards(imported);
+      messenger.showSnackBar(
+        SnackBar(content: Text('${imported.length} carte(s) restaurée(s).')),
+      );
+    } on BackupException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<String?> _askArchive(BuildContext context) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        title: Text('Coller la sauvegarde', style: TextStyle(color: AppColors.soot, fontSize: 17)),
+        content: TextField(
+          controller: controller,
+          maxLines: 6,
+          autofocus: true,
+          style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: AppColors.soot),
+          decoration: const InputDecoration(hintText: '{"format":"memotack-export",...}'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Annuler', style: TextStyle(color: AppColors.soot)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            child: Text('Continuer', style: TextStyle(color: AppColors.inkBlue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmReplace(int count) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.paper,
+        title: Text('Remplacer les cartes ?', style: TextStyle(color: AppColors.soot, fontSize: 17)),
+        content: Text(
+          'La sauvegarde contient $count carte(s). Elles remplaceront '
+          '${appState.cards.length} carte(s) actuellement dans le carnet.',
+          style: TextStyle(color: AppColors.soot.withValues(alpha: 0.7), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text('Annuler', style: TextStyle(color: AppColors.soot)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text('Remplacer', style: TextStyle(color: AppColors.corail)),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _slider({
