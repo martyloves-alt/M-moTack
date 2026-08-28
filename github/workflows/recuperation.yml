@@ -1,0 +1,28 @@
+name: recuperation-trousseau
+on: workflow_dispatch
+jobs:
+  recuperer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconstituer
+        env:
+          B64: ${{ secrets.KEYSTORE_BASE64 }}
+          A: ${{ secrets.KEY_ALIAS }}
+          KP: ${{ secrets.KEY_PASSWORD }}
+          SP: ${{ secrets.STORE_PASSWORD }}
+          KSP: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p sortie
+          printf '%s' "$B64" | tr -d '\n' | base64 -d > sortie/memotack-release.jks
+          {
+            echo "KEY_ALIAS=$A"
+            echo "KEY_PASSWORD=$KP"
+            echo "STORE_PASSWORD=$SP"
+            echo "KEYSTORE_PASSWORD=$KSP"
+          } > sortie/mots-de-passe.txt
+          ls -l sortie
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trousseau
+          path: sortie/
+          retention-days: 1
