@@ -77,6 +77,15 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+
+          # `gh secret set` depuis un fichier ou un pipe capte le saut de
+          # ligne final. Un retour chariot n'est jamais un caractere de mot de
+          # passe valide ici, et Gradle repondrait « keystore password was
+          # incorrect » sans autre indice.
+          STORE_PASSWORD=$(printf '%s' "$STORE_PASSWORD" | tr -d '\r\n')
+          KEY_PASSWORD=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')
+          KEY_ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+
           # Le fichier est cree avec des droits restreints avant d'etre rempli.
           install -m 600 /dev/null android/key.properties
           {
@@ -87,6 +96,57 @@ jobs:
           } > android/key.properties
           chmod 600 android/app/upload-keystore.jks
           echo "Clé de signature installée."
+
+      # Gradle ne decouvre un trousseau illisible qu'a l'etape packageRelease,
+      # soit apres cinq minutes de compilation, et ne dit pas LEQUEL des deux
+      # mots de passe est en cause. Ces verifications prennent une seconde et
+      # nomment precisement le probleme. Aucun mot de passe n'est affiche ; le
+      # DN et l'alias sont publics, presents dans tout APK distribue.
+      - name: Valider le trousseau avant de construire
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -uo pipefail
+          KS=android/app/upload-keystore.jks
+          SP=$(printf '%s' "$STORE_PASSWORD" | tr -d '\r\n')
+          KP=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')
+          KA=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+
+          echo "Taille du trousseau décodé : $(stat -c%s "$KS") octets"
+
+          if ! keytool -list -keystore "$KS" -storepass "$SP" >/dev/null 2>&1; then
+            echo "ÉCHEC : le trousseau ne s'ouvre pas."
+            echo "Soit le fichier décodé n'est pas un keystore valide"
+            echo "(ANDROID_KEYSTORE_BASE64 tronqué ou mal copié),"
+            echo "soit ANDROID_KEYSTORE_PASSWORD ne correspond pas."
+            exit 1
+          fi
+          echo "Mot de passe du trousseau : accepté."
+
+          if ! keytool -list -keystore "$KS" -storepass "$SP" -alias "$KA" >/dev/null 2>&1; then
+            echo "ÉCHEC : alias « $KA » introuvable. Alias présents :"
+            keytool -list -keystore "$KS" -storepass "$SP" 2>/dev/null \
+              | grep -i "alias name" || true
+            exit 1
+          fi
+          echo "Alias « $KA » : trouvé."
+
+          # -certreq a besoin de la cle privee : c'est le seul moyen simple de
+          # valider le mot de passe de cle sans le modifier.
+          if ! keytool -certreq -alias "$KA" -keystore "$KS" \
+               -storepass "$SP" -keypass "$KP" >/dev/null 2>&1; then
+            echo "ÉCHEC : ANDROID_KEY_PASSWORD ne déverrouille pas la clé."
+            echo "Le trousseau et l'alias sont bons ; seul ce mot de passe cloche."
+            exit 1
+          fi
+          echo "Mot de passe de clé : accepté."
+
+          echo "--- certificat (données publiques) ---"
+          keytool -list -v -keystore "$KS" -storepass "$SP" -alias "$KA" 2>/dev/null \
+            | grep -E "Alias name|Owner|Signature algorithm|Valid from" || true
 
       # Sur main, un APK non signable est un APK que personne ne pourra
       # installer par-dessus le precedent : mieux vaut echouer ici.
