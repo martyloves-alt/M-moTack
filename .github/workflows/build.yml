@@ -116,6 +116,11 @@ jobs:
           KA=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
 
           echo "Taille du trousseau décodé : $(stat -c%s "$KS") octets"
+          # Debut de l'empreinte du FICHIER, pour comparer avec
+          # `sha256sum martyloves-release.jks` en local et savoir si le secret
+          # contient bien le trousseau attendu. Ce n'est pas un secret : c'est
+          # le hachage d'un conteneur chiffre, tronque de surcroit.
+          echo "Empreinte du fichier (16 premiers caractères) : $(sha256sum "$KS" | cut -c1-16)"
 
           # Un secret absent arrive ici comme chaine vide. Le dire tout de
           # suite evite de chercher un probleme de mot de passe la ou c'est
@@ -125,8 +130,12 @@ jobs:
           [ -n "$KP" ] || { echo "ÉCHEC : ANDROID_KEY_PASSWORD est vide ou absent."; exit 1; }
 
           # keytool distingue lui-meme « fichier illisible » de « mot de passe
-          # faux ». Ses messages d'erreur ne contiennent aucun secret.
-          if ! ERR=$(keytool -list -keystore "$KS" -storepass "$SP" 2>&1 >/dev/null); then
+          # faux ». Ses messages ne contiennent aucun secret.
+          #
+          # Les deux flux sont captures ensemble : selon la version du JDK,
+          # keytool ecrit son erreur sur stdout et non sur stderr, et une
+          # capture de stderr seul ressort vide.
+          if ! ERR=$(keytool -list -keystore "$KS" -storepass "$SP" 2>&1); then
             echo "ÉCHEC : le trousseau ne s'ouvre pas."
             case "$ERR" in
               *"Invalid keystore format"*|*"not a valid"*|*"Unrecognized"*)
@@ -137,8 +146,10 @@ jobs:
                 echo "→ Le fichier EST un keystore valide, mais"
                 echo "  ANDROID_KEYSTORE_PASSWORD ne l'ouvre pas." ;;
               *)
-                echo "→ keytool : $ERR" ;;
+                echo "→ cause non reconnue." ;;
             esac
+            echo "--- message brut de keytool ---"
+            printf '%s\n' "$ERR" | head -6
             exit 1
           fi
           echo "Mot de passe du trousseau : accepté."
