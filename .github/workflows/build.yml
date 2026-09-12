@@ -117,11 +117,28 @@ jobs:
 
           echo "Taille du trousseau décodé : $(stat -c%s "$KS") octets"
 
-          if ! keytool -list -keystore "$KS" -storepass "$SP" >/dev/null 2>&1; then
+          # Un secret absent arrive ici comme chaine vide. Le dire tout de
+          # suite evite de chercher un probleme de mot de passe la ou c'est
+          # simplement le secret qui manque.
+          [ -n "$SP" ] || { echo "ÉCHEC : ANDROID_KEYSTORE_PASSWORD est vide ou absent."; exit 1; }
+          [ -n "$KA" ] || { echo "ÉCHEC : ANDROID_KEY_ALIAS est vide ou absent."; exit 1; }
+          [ -n "$KP" ] || { echo "ÉCHEC : ANDROID_KEY_PASSWORD est vide ou absent."; exit 1; }
+
+          # keytool distingue lui-meme « fichier illisible » de « mot de passe
+          # faux ». Ses messages d'erreur ne contiennent aucun secret.
+          if ! ERR=$(keytool -list -keystore "$KS" -storepass "$SP" 2>&1 >/dev/null); then
             echo "ÉCHEC : le trousseau ne s'ouvre pas."
-            echo "Soit le fichier décodé n'est pas un keystore valide"
-            echo "(ANDROID_KEYSTORE_BASE64 tronqué ou mal copié),"
-            echo "soit ANDROID_KEYSTORE_PASSWORD ne correspond pas."
+            case "$ERR" in
+              *"Invalid keystore format"*|*"not a valid"*|*"Unrecognized"*)
+                echo "→ Le fichier décodé n'est PAS un keystore."
+                echo "  ANDROID_KEYSTORE_BASE64 est incomplet ou mal copié."
+                echo "  À refaire avec : base64 -w 0 martyloves-release.jks" ;;
+              *"password was incorrect"*)
+                echo "→ Le fichier EST un keystore valide, mais"
+                echo "  ANDROID_KEYSTORE_PASSWORD ne l'ouvre pas." ;;
+              *)
+                echo "→ keytool : $ERR" ;;
+            esac
             exit 1
           fi
           echo "Mot de passe du trousseau : accepté."
