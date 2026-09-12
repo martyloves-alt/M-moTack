@@ -104,16 +104,32 @@ jobs:
       - name: Construire l'APK
         run: flutter build apk --release
 
-      # L'empreinte du certificat est une donnee publique, presente dans tout
-      # APK distribue : l'afficher ne revele rien de la cle privee, et permet
-      # de verifier d'un run a l'autre que la signature n'a pas change.
+      # Le DN et l'empreinte du certificat sont des donnees publiques,
+      # presentes dans tout APK distribue : les afficher ne revele rien de la
+      # cle privee.
+      #
+      # Le DN est le seul element qui identifie la cle. L'empreinte SHA-256
+      # sert a comparer d'un run a l'autre, mais ne dit pas D'OU vient la
+      # signature : c'est le DN qui distingue notre cle de release de la cle
+      # de debug, laquelle porte toujours CN=Android Debug, O=Android, C=US.
       - name: Afficher l empreinte de signature
         run: |
           set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs \
-            build/app/outputs/flutter-apk/app-release.apk \
-            | grep -i "SHA-256 digest" || true
+
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERTS" | grep -iE "certificate DN|SHA-256 digest" || true
+
+          # Un APK signe par la cle de debug n'est installable par-dessus
+          # aucune version precedente : on echoue ici plutot que de publier
+          # un artefact qui forcerait une desinstallation.
+          if echo "$CERTS" | grep -qi "CN=Android Debug"; then
+            echo "ERREUR : l'APK est signé avec la clé de DEBUG."
+            echo "La clé de release n'a pas été prise en compte."
+            exit 1
+          fi
+          echo "Signature de release confirmée (pas la clé de debug)."
 
       # Le keystore ne doit pas survivre au job, meme en cas d'echec.
       - name: Effacer la cle de signature
