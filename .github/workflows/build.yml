@@ -111,66 +111,130 @@ jobs:
         run: |
           set -uo pipefail
           KS=android/app/upload-keystore.jks
-          SP=$(printf '%s' "$STORE_PASSWORD" | tr -d '\r\n')
-          KP=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')
-          KA=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+          PROPS=android/key.properties
 
           echo "Taille du trousseau décodé : $(stat -c%s "$KS") octets"
-          # Debut de l'empreinte du FICHIER, pour comparer avec
-          # `sha256sum martyloves-release.jks` en local et savoir si le secret
-          # contient bien le trousseau attendu. Ce n'est pas un secret : c'est
-          # le hachage d'un conteneur chiffre, tronque de surcroit.
+          # Debut de l'empreinte du FICHIER, a comparer avec
+          # `sha256sum martyloves-release.jks` en local. Ce n'est pas un
+          # secret : c'est le hachage d'un conteneur chiffre, tronque.
           echo "Empreinte du fichier (16 premiers caractères) : $(sha256sum "$KS" | cut -c1-16)"
 
-          # Un secret absent arrive ici comme chaine vide. Le dire tout de
-          # suite evite de chercher un probleme de mot de passe la ou c'est
-          # simplement le secret qui manque.
-          [ -n "$SP" ] || { echo "ÉCHEC : ANDROID_KEYSTORE_PASSWORD est vide ou absent."; exit 1; }
-          [ -n "$KA" ] || { echo "ÉCHEC : ANDROID_KEY_ALIAS est vide ou absent."; exit 1; }
-          [ -n "$KP" ] || { echo "ÉCHEC : ANDROID_KEY_PASSWORD est vide ou absent."; exit 1; }
+          # Forme des secrets, sans en reveler la valeur. Deux booleens
+          # suffisent a expliquer un mot de passe qui fonctionne en local mais
+          # pas ici : un caractere invisible glisse au collage.
+          forme() {
+            local ascii="non" bords="non"
+            case "$2" in *[!\ -~]*) ascii="OUI" ;; esac
+            case "$2" in [[:space:]]*|*[[:space:]]) bords="OUI" ;; esac
+            echo "  $1 : non-ASCII ou invisible = $ascii | espaces en début/fin = $bords"
+          }
+          echo "--- forme des secrets (aucune valeur affichée) ---"
+          forme "ANDROID_KEYSTORE_PASSWORD" "$STORE_PASSWORD"
+          forme "ANDROID_KEY_PASSWORD" "$KEY_PASSWORD"
+          forme "ANDROID_KEY_ALIAS" "$KEY_ALIAS"
 
-          # keytool distingue lui-meme « fichier illisible » de « mot de passe
-          # faux ». Ses messages ne contiennent aucun secret.
-          #
-          # Les deux flux sont captures ensemble : selon la version du JDK,
-          # keytool ecrit son erreur sur stdout et non sur stderr, et une
-          # capture de stderr seul ressort vide.
-          if ! ERR=$(keytool -list -keystore "$KS" -storepass "$SP" 2>&1); then
-            echo "ÉCHEC : le trousseau ne s'ouvre pas."
+          [ -n "$STORE_PASSWORD" ] || { echo "ÉCHEC : ANDROID_KEYSTORE_PASSWORD est vide ou absent."; exit 1; }
+          [ -n "$KEY_ALIAS" ]      || { echo "ÉCHEC : ANDROID_KEY_ALIAS est vide ou absent."; exit 1; }
+          [ -n "$KEY_PASSWORD" ]   || { echo "ÉCHEC : ANDROID_KEY_PASSWORD est vide ou absent."; exit 1; }
+
+          # Variantes de normalisation, de la plus conservatrice a la plus
+          # agressive. On ne devine pas le mot de passe : on retire des
+          # caracteres qui n'ont pas leur place dans un secret colle.
+          variante() {
+            case "$1" in
+              0) printf '%s' "$2" | tr -d '\r\n' ;;
+              1) printf '%s' "$2" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ;;
+              2) printf '%s' "$2" | sed 's/\xC2\xA0//g' | tr -d '\r\n' \
+                   | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ;;
+              3) printf '%s' "$2" | tr -cd ' -~' | sed -e 's/^ *//' -e 's/ *$//' ;;
+              4) printf '%s' "$2" | tr -cd '!-~' ;;
+            esac
+          }
+          ETIQ=("valeur brute" "sans espaces bordants" "sans espaces insécables" \
+                "ASCII imprimable seul" "ASCII sans aucun espace")
+
+          # --- mot de passe du trousseau ---
+          SP=""; TROUVE=-1
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$STORE_PASSWORD")
+            [ -n "$C" ] || continue
+            if keytool -list -keystore "$KS" -storepass "$C" >/dev/null 2>&1; then
+              SP="$C"; TROUVE=$i; break
+            fi
+          done
+
+          if [ "$TROUVE" -lt 0 ]; then
+            echo "ÉCHEC : aucune variante de ANDROID_KEYSTORE_PASSWORD n'ouvre le trousseau."
+            ERR=$(keytool -list -keystore "$KS" -storepass "$(variante 0 "$STORE_PASSWORD")" 2>&1) || true
             case "$ERR" in
               *"Invalid keystore format"*|*"not a valid"*|*"Unrecognized"*)
-                echo "→ Le fichier décodé n'est PAS un keystore."
-                echo "  ANDROID_KEYSTORE_BASE64 est incomplet ou mal copié."
-                echo "  À refaire avec : base64 -w 0 martyloves-release.jks" ;;
+                echo "→ Le fichier décodé n'est PAS un keystore : ANDROID_KEYSTORE_BASE64 est en cause." ;;
               *"password was incorrect"*)
-                echo "→ Le fichier EST un keystore valide, mais"
-                echo "  ANDROID_KEYSTORE_PASSWORD ne l'ouvre pas." ;;
-              *)
-                echo "→ cause non reconnue." ;;
+                echo "→ Le fichier EST un keystore valide : le mot de passe diffère réellement." ;;
             esac
-            echo "--- message brut de keytool ---"
-            printf '%s\n' "$ERR" | head -6
+            printf '%s\n' "$ERR" | head -4
             exit 1
           fi
-          echo "Mot de passe du trousseau : accepté."
+          if [ "$TROUVE" -eq 0 ]; then
+            echo "Mot de passe du trousseau : accepté (valeur brute)."
+          else
+            echo "Mot de passe du trousseau : accepté APRÈS « ${ETIQ[$TROUVE]} »."
+            echo "⚠ Le secret contient des caractères parasites. À recréer proprement :"
+            echo "    gh secret set ANDROID_KEYSTORE_PASSWORD --repo martyloves-alt/M-moTack"
+          fi
 
-          if ! keytool -list -keystore "$KS" -storepass "$SP" -alias "$KA" >/dev/null 2>&1; then
-            echo "ÉCHEC : alias « $KA » introuvable. Alias présents :"
-            keytool -list -keystore "$KS" -storepass "$SP" 2>/dev/null \
-              | grep -i "alias name" || true
+          # --- alias ---
+          KA=""
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$KEY_ALIAS")
+            [ -n "$C" ] || continue
+            if keytool -list -keystore "$KS" -storepass "$SP" -alias "$C" >/dev/null 2>&1; then
+              KA="$C"
+              [ "$i" -eq 0 ] || echo "⚠ Alias accepté après « ${ETIQ[$i]} » : secret à recréer."
+              break
+            fi
+          done
+          if [ -z "$KA" ]; then
+            echo "ÉCHEC : alias introuvable. Alias réellement présents dans le trousseau :"
+            keytool -list -keystore "$KS" -storepass "$SP" 2>/dev/null | grep -i "alias name" || true
             exit 1
           fi
           echo "Alias « $KA » : trouvé."
 
-          # -certreq a besoin de la cle privee : c'est le seul moyen simple de
-          # valider le mot de passe de cle sans le modifier.
-          if ! keytool -certreq -alias "$KA" -keystore "$KS" \
-               -storepass "$SP" -keypass "$KP" >/dev/null 2>&1; then
+          # --- mot de passe de cle ---
+          # -certreq a besoin de la cle privee : c'est le moyen le plus simple
+          # de valider ce mot de passe sans le modifier.
+          KP=""
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$KEY_PASSWORD")
+            [ -n "$C" ] || continue
+            if keytool -certreq -alias "$KA" -keystore "$KS" \
+                 -storepass "$SP" -keypass "$C" >/dev/null 2>&1; then
+              KP="$C"
+              [ "$i" -eq 0 ] || {
+                echo "⚠ Mot de passe de clé accepté après « ${ETIQ[$i]} » : secret à recréer."
+                echo "    gh secret set ANDROID_KEY_PASSWORD --repo martyloves-alt/M-moTack"
+              }
+              break
+            fi
+          done
+          if [ -z "$KP" ]; then
             echo "ÉCHEC : ANDROID_KEY_PASSWORD ne déverrouille pas la clé."
             echo "Le trousseau et l'alias sont bons ; seul ce mot de passe cloche."
             exit 1
           fi
           echo "Mot de passe de clé : accepté."
+
+          # Gradle doit recevoir les valeurs qui FONCTIONNENT, pas celles du
+          # secret brut : key.properties est reecrit ici.
+          install -m 600 /dev/null "$PROPS"
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$SP"
+            echo "keyPassword=$KP"
+            echo "keyAlias=$KA"
+          } > "$PROPS"
+          echo "key.properties réécrit avec les valeurs validées."
 
           echo "--- certificat (données publiques) ---"
           keytool -list -v -keystore "$KS" -storepass "$SP" -alias "$KA" 2>/dev/null \
