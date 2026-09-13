@@ -13,6 +13,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # `secrets` n'est pas lisible dans un `if:` d'etape : on projette
+      # seulement la PRESENCE du secret, jamais sa valeur.
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,13 +49,246 @@ jobs:
             || { echo "Regles ProGuard non referencees"; exit 1; }
           grep -q "keepattributes Signature" android/app/proguard-rules.pro \
             || { echo "Regle Gson Signature absente"; exit 1; }
+          # Un keystore versionne est un keystore compromis : il faudrait en
+          # changer, donc perdre la possibilite de mettre a jour l'application
+          # deja installee. On refuse le build plutot que de le laisser passer.
+          if git ls-files | grep -qE '\.(jks|keystore)$|(^|/)key\.properties$'; then
+            echo "Un fichier de signature est versionné dans le dépôt :"
+            git ls-files | grep -E '\.(jks|keystore)$|(^|/)key\.properties$'
+            exit 1
+          fi
           echo "Configuration Android versionnee intacte apres flutter create."
+
+      # Signature stable. Sans elle, Gradle retombe sur la cle de debug, que
+      # le runner regenere a chaque execution : chaque APK porterait une
+      # signature differente, Android refuserait la mise a jour et imposerait
+      # une desinstallation, qui detruit les donnees de l'utilisateur.
+      #
+      # Rien n'est affiche ici : ni le keystore, ni les mots de passe, ni le
+      # fichier key.properties. Les secrets ne transitent que par des
+      # variables d'environnement, que GitHub masque dans les journaux.
+      - name: Installer la cle de signature
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+
+          # `gh secret set` depuis un fichier ou un pipe capte le saut de
+          # ligne final. Un retour chariot n'est jamais un caractere de mot de
+          # passe valide ici, et Gradle repondrait « keystore password was
+          # incorrect » sans autre indice.
+          STORE_PASSWORD=$(printf '%s' "$STORE_PASSWORD" | tr -d '\r\n')
+          KEY_PASSWORD=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')
+          KEY_ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+
+          # Le fichier est cree avec des droits restreints avant d'etre rempli.
+          install -m 600 /dev/null android/key.properties
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+          } > android/key.properties
+          chmod 600 android/app/upload-keystore.jks
+          echo "Clé de signature installée."
+
+      # Gradle ne decouvre un trousseau illisible qu'a l'etape packageRelease,
+      # soit apres cinq minutes de compilation, et ne dit pas LEQUEL des deux
+      # mots de passe est en cause. Ces verifications prennent une seconde et
+      # nomment precisement le probleme. Aucun mot de passe n'est affiche ; le
+      # DN et l'alias sont publics, presents dans tout APK distribue.
+      - name: Valider le trousseau avant de construire
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -uo pipefail
+          KS=android/app/upload-keystore.jks
+          PROPS=android/key.properties
+
+          echo "Taille du trousseau décodé : $(stat -c%s "$KS") octets"
+          # Debut de l'empreinte du FICHIER, a comparer avec
+          # `sha256sum martyloves-release.jks` en local. Ce n'est pas un
+          # secret : c'est le hachage d'un conteneur chiffre, tronque.
+          echo "Empreinte du fichier (16 premiers caractères) : $(sha256sum "$KS" | cut -c1-16)"
+
+          # Forme des secrets, sans en reveler la valeur. Deux booleens
+          # suffisent a expliquer un mot de passe qui fonctionne en local mais
+          # pas ici : un caractere invisible glisse au collage.
+          forme() {
+            local ascii="non" bords="non"
+            case "$2" in *[!\ -~]*) ascii="OUI" ;; esac
+            case "$2" in [[:space:]]*|*[[:space:]]) bords="OUI" ;; esac
+            echo "  $1 : non-ASCII ou invisible = $ascii | espaces en début/fin = $bords"
+          }
+          echo "--- forme des secrets (aucune valeur affichée) ---"
+          forme "ANDROID_KEYSTORE_PASSWORD" "$STORE_PASSWORD"
+          forme "ANDROID_KEY_PASSWORD" "$KEY_PASSWORD"
+          forme "ANDROID_KEY_ALIAS" "$KEY_ALIAS"
+
+          [ -n "$STORE_PASSWORD" ] || { echo "ÉCHEC : ANDROID_KEYSTORE_PASSWORD est vide ou absent."; exit 1; }
+          [ -n "$KEY_ALIAS" ]      || { echo "ÉCHEC : ANDROID_KEY_ALIAS est vide ou absent."; exit 1; }
+          [ -n "$KEY_PASSWORD" ]   || { echo "ÉCHEC : ANDROID_KEY_PASSWORD est vide ou absent."; exit 1; }
+
+          # Variantes de normalisation, de la plus conservatrice a la plus
+          # agressive. On ne devine pas le mot de passe : on retire des
+          # caracteres qui n'ont pas leur place dans un secret colle.
+          variante() {
+            case "$1" in
+              0) printf '%s' "$2" | tr -d '\r\n' ;;
+              1) printf '%s' "$2" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ;;
+              2) printf '%s' "$2" | sed 's/\xC2\xA0//g' | tr -d '\r\n' \
+                   | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ;;
+              3) printf '%s' "$2" | tr -cd ' -~' | sed -e 's/^ *//' -e 's/ *$//' ;;
+              4) printf '%s' "$2" | tr -cd '!-~' ;;
+            esac
+          }
+          ETIQ=("valeur brute" "sans espaces bordants" "sans espaces insécables" \
+                "ASCII imprimable seul" "ASCII sans aucun espace")
+
+          # --- mot de passe du trousseau ---
+          SP=""; TROUVE=-1
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$STORE_PASSWORD")
+            [ -n "$C" ] || continue
+            if keytool -list -keystore "$KS" -storepass "$C" >/dev/null 2>&1; then
+              SP="$C"; TROUVE=$i; break
+            fi
+          done
+
+          if [ "$TROUVE" -lt 0 ]; then
+            echo "ÉCHEC : aucune variante de ANDROID_KEYSTORE_PASSWORD n'ouvre le trousseau."
+            ERR=$(keytool -list -keystore "$KS" -storepass "$(variante 0 "$STORE_PASSWORD")" 2>&1) || true
+            case "$ERR" in
+              *"Invalid keystore format"*|*"not a valid"*|*"Unrecognized"*)
+                echo "→ Le fichier décodé n'est PAS un keystore : ANDROID_KEYSTORE_BASE64 est en cause." ;;
+              *"password was incorrect"*)
+                echo "→ Le fichier EST un keystore valide : le mot de passe diffère réellement." ;;
+            esac
+            printf '%s\n' "$ERR" | head -4
+            exit 1
+          fi
+          if [ "$TROUVE" -eq 0 ]; then
+            echo "Mot de passe du trousseau : accepté (valeur brute)."
+          else
+            echo "Mot de passe du trousseau : accepté APRÈS « ${ETIQ[$TROUVE]} »."
+            echo "⚠ Le secret contient des caractères parasites. À recréer proprement :"
+            echo "    gh secret set ANDROID_KEYSTORE_PASSWORD --repo martyloves-alt/M-moTack"
+          fi
+
+          # --- alias ---
+          KA=""
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$KEY_ALIAS")
+            [ -n "$C" ] || continue
+            if keytool -list -keystore "$KS" -storepass "$SP" -alias "$C" >/dev/null 2>&1; then
+              KA="$C"
+              [ "$i" -eq 0 ] || echo "⚠ Alias accepté après « ${ETIQ[$i]} » : secret à recréer."
+              break
+            fi
+          done
+          if [ -z "$KA" ]; then
+            echo "ÉCHEC : alias introuvable. Alias réellement présents dans le trousseau :"
+            keytool -list -keystore "$KS" -storepass "$SP" 2>/dev/null | grep -i "alias name" || true
+            exit 1
+          fi
+          echo "Alias « $KA » : trouvé."
+
+          # --- mot de passe de cle ---
+          # -certreq a besoin de la cle privee : c'est le moyen le plus simple
+          # de valider ce mot de passe sans le modifier.
+          KP=""
+          for i in 0 1 2 3 4; do
+            C=$(variante "$i" "$KEY_PASSWORD")
+            [ -n "$C" ] || continue
+            if keytool -certreq -alias "$KA" -keystore "$KS" \
+                 -storepass "$SP" -keypass "$C" >/dev/null 2>&1; then
+              KP="$C"
+              [ "$i" -eq 0 ] || {
+                echo "⚠ Mot de passe de clé accepté après « ${ETIQ[$i]} » : secret à recréer."
+                echo "    gh secret set ANDROID_KEY_PASSWORD --repo martyloves-alt/M-moTack"
+              }
+              break
+            fi
+          done
+          if [ -z "$KP" ]; then
+            echo "ÉCHEC : ANDROID_KEY_PASSWORD ne déverrouille pas la clé."
+            echo "Le trousseau et l'alias sont bons ; seul ce mot de passe cloche."
+            exit 1
+          fi
+          echo "Mot de passe de clé : accepté."
+
+          # Gradle doit recevoir les valeurs qui FONCTIONNENT, pas celles du
+          # secret brut : key.properties est reecrit ici.
+          install -m 600 /dev/null "$PROPS"
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$SP"
+            echo "keyPassword=$KP"
+            echo "keyAlias=$KA"
+          } > "$PROPS"
+          echo "key.properties réécrit avec les valeurs validées."
+
+          echo "--- certificat (données publiques) ---"
+          keytool -list -v -keystore "$KS" -storepass "$SP" -alias "$KA" 2>/dev/null \
+            | grep -E "Alias name|Owner|Signature algorithm|Valid from" || true
+
+      # Sur main, un APK non signable est un APK que personne ne pourra
+      # installer par-dessus le precedent : mieux vaut echouer ici.
+      - name: Exiger une signature stable sur main
+        if: github.ref == 'refs/heads/main' && env.HAS_KEYSTORE != 'true'
+        run: |
+          echo "ANDROID_KEYSTORE_BASE64 absent des secrets du dépôt."
+          echo "Sans lui, l'APK serait signé avec une clé de debug régénérée"
+          echo "à chaque run, et chaque mise à jour effacerait les données."
+          exit 1
 
       - name: Installer les dependances
         run: flutter pub get
 
       - name: Construire l'APK
         run: flutter build apk --release
+
+      # Le DN et l'empreinte du certificat sont des donnees publiques,
+      # presentes dans tout APK distribue : les afficher ne revele rien de la
+      # cle privee.
+      #
+      # Le DN est le seul element qui identifie la cle. L'empreinte SHA-256
+      # sert a comparer d'un run a l'autre, mais ne dit pas D'OU vient la
+      # signature : c'est le DN qui distingue notre cle de release de la cle
+      # de debug, laquelle porte toujours CN=Android Debug, O=Android, C=US.
+      - name: Afficher l empreinte de signature
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERTS" | grep -iE "certificate DN|SHA-256 digest" || true
+
+          # Un APK signe par la cle de debug n'est installable par-dessus
+          # aucune version precedente : on echoue ici plutot que de publier
+          # un artefact qui forcerait une desinstallation.
+          if echo "$CERTS" | grep -qi "CN=Android Debug"; then
+            echo "ERREUR : l'APK est signé avec la clé de DEBUG."
+            echo "La clé de release n'a pas été prise en compte."
+            exit 1
+          fi
+          echo "Signature de release confirmée (pas la clé de debug)."
+
+      # Le keystore ne doit pas survivre au job, meme en cas d'echec.
+      - name: Effacer la cle de signature
+        if: always()
+        run: |
+          rm -f android/app/upload-keystore.jks android/key.properties
+          echo "Clé de signature effacée du runner."
 
       - name: Mettre l'APK a disposition
         uses: actions/upload-artifact@v4

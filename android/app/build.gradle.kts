@@ -8,11 +8,33 @@
 //   - les regles ProGuard/R8, sans lesquelles Gson perd les TypeToken
 //     generiques et zonedSchedule() echoue avec « Missing type parameter. ».
 
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Signature de release.
+//
+// android/key.properties n'est JAMAIS versionne : il est ecrit au moment du
+// build a partir des GitHub Secrets (voir .github/workflows/build.yml), ou
+// cree a la main pour un build local.
+//
+// Sans lui, on retombe sur la cle de debug. C'etait le comportement du
+// gabarit Flutter, et il est piegeux : sur un runner CI, cette cle est
+// regeneree a chaque execution, donc chaque APK porte une signature
+// differente. Android refuse alors la mise a jour (« Application non
+// installée ») et impose une desinstallation, qui detruit les donnees.
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        FileInputStream(keystorePropertiesFile).use { load(it) }
+    }
+}
+val hasReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
     namespace = "com.example.memotack"
@@ -34,11 +56,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                // Chemin relatif a android/app/.
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Cle de release des qu'elle est disponible. Le repli sur la cle
+            // de debug ne sert qu'aux builds locaux sans key.properties ; en
+            // CI, l'absence de keystore fait echouer le build plus bas,
+            // plutot que de produire un APK a la signature instable.
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
 
             // R8 tourne sur cette build : sans les regles ci-dessous, il
             // supprime les signatures generiques dont Gson a besoin pour
