@@ -315,81 +315,109 @@ class _CardTile extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.paper,
+      // Sans ceci, la feuille est plafonnee a 9/16 de l'ecran : au-dela, le
+      // contenu est rogne sans aucun moyen d'y acceder.
+      isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
-            return Padding(
-              padding: const EdgeInsets.all(24),
+            return ConstrainedBox(
+              // La feuille peut grandir, mais jamais jusqu'a masquer
+              // entierement la liste derriere elle.
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(tag.name, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          card.front,
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: AppColors.soot),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Écouter',
-                        icon: Icon(Icons.volume_up_outlined, color: AppColors.inkBlue),
-                        onPressed: () => _openLecture(sheetContext),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (card.back.isNotEmpty)
-                    GestureDetector(
-                      onTap: () => setSheetState(() => showBack = !showBack),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.soot.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          showBack ? card.back : 'Toucher pour voir la définition',
-                          style: TextStyle(color: AppColors.soot.withValues(alpha: 0.8)),
-                        ),
+                  // Flexible et NON Expanded : Expanded forcerait la colonne a
+                  // occuper toute la hauteur autorisee, si bien qu'une carte
+                  // d'un seul mot ouvrirait une feuille de 85 % de l'ecran.
+                  // Flexible laisse le contenu court rester court, et ne
+                  // plafonne que le contenu long — qui devient defilable.
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(tag.name, style: TextStyle(color: AppColors.soot.withValues(alpha: 0.6), fontSize: 12)),
+                          const SizedBox(height: 8),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  card.front,
+                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: AppColors.soot),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Écouter',
+                                icon: Icon(Icons.volume_up_outlined, color: AppColors.inkBlue),
+                                onPressed: () => _openLecture(sheetContext),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          if (card.back.isNotEmpty)
+                            GestureDetector(
+                              onTap: () => setSheetState(() => showBack = !showBack),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.soot.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  showBack ? card.back : 'Toucher pour voir la définition',
+                                  style: TextStyle(color: AppColors.soot.withValues(alpha: 0.8)),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            appState.updateCard(
-                              reviewCard(card: card, remembered: false, now: DateTime.now()),
-                            );
-                            Navigator.pop(sheetContext);
-                          },
-                          child: const Text('À revoir'),
+                  ),
+                  // Les deux actions restent hors du defilement : sur une
+                  // definition longue, elles etaient rognees avec le reste, ce
+                  // qui rendait la carte impossible a reviser.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              appState.updateCard(
+                                reviewCard(card: card, remembered: false, now: DateTime.now()),
+                              );
+                              Navigator.pop(sheetContext);
+                            },
+                            child: const Text('À revoir'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(backgroundColor: AppColors.inkBlue),
-                          onPressed: () {
-                            appState.updateCard(
-                              reviewCard(card: card, remembered: true, now: DateTime.now()),
-                            );
-                            Navigator.pop(sheetContext);
-                          },
-                          child: const Text("Je m'en souviens"),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: AppColors.inkBlue),
+                            onPressed: () {
+                              appState.updateCard(
+                                reviewCard(card: card, remembered: true, now: DateTime.now()),
+                              );
+                              Navigator.pop(sheetContext);
+                            },
+                            child: const Text("Je m'en souviens"),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
